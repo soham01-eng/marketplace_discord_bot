@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Marketplace search fixture</title>
+  </head>
+  <body>
+    <!-- Sanitized structural fixture: generated class names are intentionally absent. -->
+    <main aria-label="Marketplace search results">
+      <a
+        href="/marketplace/item/123456789012345/?ref=search"
+        aria-label="Marketplace listing: Herman Miller Aeron Office Chair, Detroit, MI, listing 123456789012345"
+      >
+        <img
+          src="https://example.com/images/aeron.jpg"
+          alt="Photo of an office chair"
+        >
+        <span>$125</span>
+        <span>Herman Miller Aeron Office Chair</span>
+        <span>Detroit, Michigan</span>
+      </a>
+
+      <a
+        href="https://www.facebook.com/marketplace/item/987654321098765?ref=search"
+      >
+        <span>Free</span>
+        <span>Wooden Office Chair</span>
+        <span>Dearborn, Michigan</span>
+      </a>
+
+      <a href="/marketplace/item/555555555555555/">
+        <span>Steelcase Leap Office Chair</span>
+      </a>
+
+      <!-- Duplicate tracking link for the first item should not duplicate output. -->
+      <a href="/marketplace/item/123456789012345/?ref=related">
+        <span>$125</span>
+        <span>Herman Miller Aeron Office Chair</span>
+      </a>
+
+      <!-- Non-numeric URLs are not stable listing identifiers and are ignored. -->
+      <a href="/marketplace/item/not-a-stable-id/">Ignore this card</a>
+    </main>
+  </body>
+</html>

@@ -12,7 +12,9 @@ Marketplace support will remain an experimental Playwright integration.
 The Discord bot stores user-owned watches in a local SQLite database. Its
 central scanner searches through interchangeable providers, applies query and
 price filters, deduplicates matches, and sends direct-message notifications.
-Manual and scheduled scans use the same workflow.
+Manual and scheduled scans use the same workflow. The reliable mock provider
+is the default; an anonymous-first Facebook Marketplace provider is available
+as an explicitly experimental option.
 
 ## Technology
 
@@ -76,6 +78,11 @@ restarts. By default, local data is stored in `data/marketplace.db`; set
 by Git. `/scan` runs all enabled watches immediately; the same scan runs in the
 background every `SCAN_INTERVAL_MINUTES` (30 minutes by default).
 
+Set `FACEBOOK_MARKETPLACE_LOCATION` to the location slug used in Marketplace
+URLs, such as `detroit` or `ann-arbor`. It defaults to `detroit`. When creating
+a watch, `/watch add` offers `mock` and experimental `facebook` provider
+choices; existing behavior remains on `mock` unless Facebook is selected.
+
 ## Listing providers
 
 Every marketplace provider implements the asynchronous `ListingProvider`
@@ -83,6 +90,24 @@ contract and returns the same `Listing` model. This keeps marketplace-specific
 behavior outside the scanner and Discord UI. `MockProvider` loads tracked data
 from `data/sample_listings.json`, making development and demonstrations
 repeatable without external network access.
+
+`FacebookProvider` uses a temporary headless Chromium browser to load one
+bounded, location-scoped search page. It extracts stable
+`/marketplace/item/<id>` links and normalizes their title, price, URL, and
+optional image without relying on generated CSS classes. It stores no Facebook
+credentials or persistent browser session.
+
+Test anonymous access independently from Discord:
+
+```bash
+python -m scripts.check_facebook_access --query "office chair"
+```
+
+Facebook may redirect anonymous browsers to login, present a challenge, time
+out, or change its markup. Those cases produce a clear provider error; the
+scanner records a failure for that watch and continues scanning other watches.
+The implementation does not attempt CAPTCHA solving, proxy rotation,
+fingerprint spoofing, or checkpoint circumvention.
 
 When a matching listing has not been seen for that watch, the bot saves its
 stable external ID and sends the watch owner a Discord direct message. Saving
@@ -94,9 +119,10 @@ in one watch or provider is logged without stopping the remaining watches.
 ```bash
 python main.py
 python -m ruff check .
+python -m ruff format --check .
 python -m pytest
 ```
 
-Facebook Marketplace is an experimental provider. The finished application
-will remain runnable and testable with mock data if Facebook changes or blocks
-automated access.
+CI parses a saved, sanitized Marketplace HTML fixture and never depends on
+live Facebook access. The application remains runnable and testable with mock
+data if Facebook changes or blocks automated access.

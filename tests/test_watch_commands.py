@@ -65,3 +65,30 @@ async def test_watch_commands_create_list_and_remove_owned_watch(tmp_path) -> No
     assert remove_interaction.response.messages == [("Removed watch #1.", True)]
     assert database.list_watches(101) == []
     database.close()
+
+
+@pytest.mark.asyncio
+async def test_watch_add_accepts_experimental_facebook_provider(tmp_path) -> None:
+    database = Database(tmp_path / "commands.db")
+    bot = create_bot(guild_id=123456789, database=database)
+    watch_group = bot.tree.get_command("watch", guild=bot.development_guild)
+    assert isinstance(watch_group, app_commands.Group)
+    add_command = watch_group.get_command("add")
+    assert add_command is not None
+
+    interaction = FakeInteraction(user_id=101)
+    await add_command.callback(
+        interaction,
+        "office chair",
+        150,
+        "facebook",
+    )
+
+    assert interaction.response.messages == [
+        (
+            'Saved watch #1 for "office chair" (maximum $150.00, provider: facebook).',
+            True,
+        )
+    ]
+    assert database.list_watches(101)[0].provider == "facebook"
+    database.close()
