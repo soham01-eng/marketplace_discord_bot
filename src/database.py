@@ -115,6 +115,36 @@ class Database:
         ).fetchall()
         return [_watch_from_row(row) for row in rows]
 
+    def list_enabled_watches(self) -> list[Watch]:
+        """Return every enabled watch in creation order for scanning."""
+        rows = self._connection.execute(
+            """
+            SELECT *
+            FROM watches
+            WHERE enabled = 1
+            ORDER BY id
+            """
+        ).fetchall()
+        return [_watch_from_row(row) for row in rows]
+
+    def update_watch_last_checked(
+        self,
+        watch_id: int,
+        checked_at: str | None = None,
+    ) -> bool:
+        """Record when a watch was last attempted by the scanner."""
+        timestamp = _utc_now() if checked_at is None else checked_at
+        cursor = self._connection.execute(
+            """
+            UPDATE watches
+            SET last_checked = ?
+            WHERE id = ?
+            """,
+            (timestamp, watch_id),
+        )
+        self._connection.commit()
+        return cursor.rowcount == 1
+
     def delete_watch(self, watch_id: int, discord_user_id: int) -> bool:
         """Delete a watch only when it belongs to the requesting Discord user."""
         cursor = self._connection.execute(
