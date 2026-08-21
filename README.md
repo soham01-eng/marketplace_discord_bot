@@ -9,9 +9,9 @@ Marketplace support will remain an experimental Playwright integration.
 
 ## Current status
 
-Step 1 is complete: the Python project, local environment template, linting,
-and test tooling are initialized. Discord commands and application behavior
-will be added in later development steps.
+The Python project and local development environment are initialized. The
+initial Discord slash commands are available as testable placeholders while
+persistence and scanner behavior are developed.
 
 ## Technology
 
@@ -29,7 +29,7 @@ will be added in later development steps.
 ```powershell
 git clone https://github.com/soham01-eng/marketplace_discord_bot.git
 cd marketplace_discord_bot
-py -3.12 -m venv .venv
+py -3 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
@@ -52,6 +52,25 @@ cp .env.example .env
 
 Do not commit `.env`. It will contain the Discord token once the bot is
 created.
+
+## Run the bot
+
+Add your bot token and test-server ID to the local `.env` file, then run:
+
+```bash
+python main.py
+```
+
+The development server receives these slash commands:
+
+- `/watch add`
+- `/watch list`
+- `/watch remove`
+- `/scan`
+- `/status`
+
+The commands currently return placeholder responses. Database persistence and
+the listing scanner are separate development steps.
 
 ## Verify the setup
 
