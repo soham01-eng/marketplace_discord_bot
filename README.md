@@ -14,6 +14,12 @@ automation, data normalization, automated testing, and CI. It remains fully
 demonstrable through deterministic mock data even when an external marketplace
 is unavailable.
 
+## Demo
+
+| Create a persistent watch | Receive a new-listing alert |
+|:---:|:---:|
+| ![Discord confirmation after creating an office chair watch](docs/screenshots/watch-command.png) | ![Discord direct-message embed for a matching office chair](docs/screenshots/listing-notification.png) |
+
 ## Features
 
 - Manage personal watches through `/watch add`, `/watch list`, and
@@ -255,6 +261,7 @@ Chromium, or live Facebook access.
 ```text
 marketplace_discord_bot/
 ├── data/                         # Tracked mock data; local database is ignored
+├── docs/screenshots/             # Sanitized Discord portfolio images
 ├── scripts/                      # Standalone Facebook access experiment
 ├── src/
 │   ├── providers/                # Provider contract, mock, and Facebook
