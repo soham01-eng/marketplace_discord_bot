@@ -1,0 +1,27 @@
+[
+  {
+    "external_id": "mock-1001",
+    "title": "ASUS RTX 4070 Dual",
+    "price": 400,
+    "url": "https://example.com/listings/mock-1001",
+    "image_url": "https://example.com/images/mock-1001.jpg"
+  },
+  {
+    "external_id": "mock-1002",
+    "title": "Sony PS5 Console",
+    "price": 300,
+    "url": "https://example.com/listings/mock-1002"
+  },
+  {
+    "external_id": "mock-1003",
+    "title": "Herman Miller Office Chair",
+    "price": 125,
+    "url": "https://example.com/listings/mock-1003",
+    "image_url": null
+  },
+  {
+    "external_id": "mock-1004",
+    "title": "Vintage Desk Lamp",
+    "url": "https://example.com/listings/mock-1004"
+  }
+]
