@@ -25,6 +25,7 @@ def main() -> None:
         settings.discord_token,
         settings.discord_guild_id,
         settings.database_path,
+        settings.scan_interval_minutes,
     )
 
 

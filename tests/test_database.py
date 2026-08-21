@@ -90,3 +90,18 @@ def test_deleting_watch_cascades_to_seen_listings(tmp_path) -> None:
     assert database.delete_watch(watch.id, discord_user_id=101) is True
     assert database.has_seen_listing(watch.id, "mock", "listing-1") is False
     database.close()
+
+
+def test_enabled_watches_and_last_checked_support_scanning(tmp_path) -> None:
+    database = Database(tmp_path / "marketplace.db")
+    watch = database.create_watch(discord_user_id=101, query="monitor")
+
+    assert database.list_enabled_watches() == [watch]
+    assert database.update_watch_last_checked(
+        watch.id,
+        checked_at="2026-08-21T12:00:00+00:00",
+    )
+    assert database.list_enabled_watches()[0].last_checked == (
+        "2026-08-21T12:00:00+00:00"
+    )
+    database.close()

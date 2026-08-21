@@ -1,13 +1,18 @@
 """Discord bot and slash-command definitions."""
 
+import asyncio
 import logging
+from contextlib import suppress
 from pathlib import Path
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from src.database import Database
+from src.notifier import DiscordNotifier
+from src.providers import MockProvider
+from src.scanner import Scanner, ScanResult
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +20,24 @@ logger = logging.getLogger(__name__)
 class MarketplaceBot(commands.Bot):
     """Discord bot configured for rapid command syncing in one development server."""
 
-    def __init__(self, guild_id: int, database: Database) -> None:
+    def __init__(
+        self,
+        guild_id: int,
+        database: Database,
+        scan_interval_minutes: int,
+        scanner: Scanner | None = None,
+    ) -> None:
         intents = discord.Intents.default()
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.development_guild = discord.Object(id=guild_id)
         self.database = database
+        self.scan_interval_minutes = scan_interval_minutes
+        self.scanner = scanner or Scanner(
+            database=database,
+            providers={"mock": MockProvider()},
+            notifier=DiscordNotifier(self),
+        )
+        self.scheduled_scan.change_interval(minutes=scan_interval_minutes)
 
     async def setup_hook(self) -> None:
         """Synchronize commands to the test server before the bot becomes ready."""
@@ -29,6 +47,7 @@ class MarketplaceBot(commands.Bot):
             len(synced),
             self.development_guild.id,
         )
+        self.scheduled_scan.start()
 
     async def on_ready(self) -> None:
         """Log a safe startup message once Discord finishes connecting."""
@@ -37,15 +56,47 @@ class MarketplaceBot(commands.Bot):
 
     async def close(self) -> None:
         """Close Discord and the local database connection."""
+        scheduled_task = self.scheduled_scan.get_task()
+        self.scheduled_scan.cancel()
+        if scheduled_task is not None:
+            with suppress(asyncio.CancelledError):
+                await scheduled_task
         try:
             await super().close()
         finally:
             self.database.close()
 
+    async def run_scan(self) -> ScanResult:
+        """Run the same scanner used by manual and scheduled entry points."""
+        return await self.scanner.scan_watches()
 
-def create_bot(guild_id: int, database: Database) -> MarketplaceBot:
+    @tasks.loop(minutes=30)
+    async def scheduled_scan(self) -> None:
+        """Run the shared scanner on the configured interval."""
+        try:
+            await self.run_scan()
+        except Exception:
+            logger.exception("Scheduled scan could not be completed")
+
+    @scheduled_scan.before_loop
+    async def wait_before_scheduled_scan(self) -> None:
+        """Wait for Discord to be ready before sending scheduled notifications."""
+        await self.wait_until_ready()
+
+
+def create_bot(
+    guild_id: int,
+    database: Database,
+    scan_interval_minutes: int = 30,
+    scanner: Scanner | None = None,
+) -> MarketplaceBot:
     """Create a bot instance and register the MVP commands."""
-    bot = MarketplaceBot(guild_id, database)
+    bot = MarketplaceBot(
+        guild_id,
+        database,
+        scan_interval_minutes,
+        scanner,
+    )
     watch_group = app_commands.Group(
         name="watch",
         description="Manage marketplace watches",
@@ -137,8 +188,15 @@ def create_bot(guild_id: int, database: Database) -> MarketplaceBot:
         guild=bot.development_guild,
     )
     async def scan(interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(
-            "Manual scanning is connected. Provider scanning will be added later.",
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await bot.run_scan()
+        await interaction.followup.send(
+            "Scan complete.\n"
+            f"Watches scanned: {result.watches_scanned}\n"
+            f"Listings returned: {result.listings_found}\n"
+            f"New matches: {result.new_listings}\n"
+            f"Notifications sent: {result.notifications_sent}\n"
+            f"Failures: {result.failures}",
             ephemeral=True,
         )
 
@@ -149,11 +207,15 @@ def create_bot(guild_id: int, database: Database) -> MarketplaceBot:
     )
     async def status(interaction: discord.Interaction) -> None:
         latency_ms = round(bot.latency * 1000)
+        scanner_state = "running" if bot.scanner.is_running else "idle"
+        last_scan = bot.scanner.last_finished_at or "never"
         await interaction.response.send_message(
             "Bot: online\n"
             f"Discord latency: {latency_ms} ms\n"
             "Database: connected\n"
-            "Scanner: not implemented",
+            f"Scanner: {scanner_state}\n"
+            f"Scan interval: {bot.scan_interval_minutes} minutes\n"
+            f"Last completed scan: {last_scan}",
             ephemeral=True,
         )
 
@@ -176,11 +238,16 @@ def create_bot(guild_id: int, database: Database) -> MarketplaceBot:
     return bot
 
 
-def run_bot(token: str, guild_id: int, database_path: str | Path) -> None:
+def run_bot(
+    token: str,
+    guild_id: int,
+    database_path: str | Path,
+    scan_interval_minutes: int = 30,
+) -> None:
     """Connect the configured bot to Discord."""
     database = Database(database_path)
     try:
-        bot = create_bot(guild_id, database)
+        bot = create_bot(guild_id, database, scan_interval_minutes)
         bot.run(token, log_handler=None)
     finally:
         database.close()

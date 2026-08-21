@@ -9,9 +9,10 @@ Marketplace support will remain an experimental Playwright integration.
 
 ## Current status
 
-The Discord bot stores user-owned watches in a local SQLite database. A
-provider interface and deterministic, network-free mock provider now supply
-normalized listings. The scanner is the next development step.
+The Discord bot stores user-owned watches in a local SQLite database. Its
+central scanner searches through interchangeable providers, applies query and
+price filters, deduplicates matches, and sends direct-message notifications.
+Manual and scheduled scans use the same workflow.
 
 ## Technology
 
@@ -72,8 +73,8 @@ The development server receives these slash commands:
 `/watch add`, `/watch list`, and `/watch remove` persist watches between bot
 restarts. By default, local data is stored in `data/marketplace.db`; set
 `DATABASE_PATH` in `.env` to use another location. Database files are ignored
-by Git. `/scan` remains a placeholder until the provider and scanner steps are
-complete.
+by Git. `/scan` runs all enabled watches immediately; the same scan runs in the
+background every `SCAN_INTERVAL_MINUTES` (30 minutes by default).
 
 ## Listing providers
 
@@ -82,6 +83,11 @@ contract and returns the same `Listing` model. This keeps marketplace-specific
 behavior outside the scanner and Discord UI. `MockProvider` loads tracked data
 from `data/sample_listings.json`, making development and demonstrations
 repeatable without external network access.
+
+When a matching listing has not been seen for that watch, the bot saves its
+stable external ID and sends the watch owner a Discord direct message. Saving
+first prevents duplicate alerts on later manual or scheduled scans. A failure
+in one watch or provider is logged without stopping the remaining watches.
 
 ## Verify the setup
 
