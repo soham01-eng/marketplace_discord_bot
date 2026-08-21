@@ -4,6 +4,7 @@ from discord import app_commands
 
 from src.bot import create_bot
 from src.database import Database
+from src.providers import FacebookProvider, MockProvider
 
 
 def test_bot_registers_planned_commands(tmp_path) -> None:
@@ -22,4 +23,6 @@ def test_bot_registers_planned_commands(tmp_path) -> None:
         "list",
         "remove",
     }
+    assert isinstance(bot.scanner.providers["mock"], MockProvider)
+    assert isinstance(bot.scanner.providers["facebook"], FacebookProvider)
     database.close()

@@ -26,6 +26,7 @@ def main() -> None:
         settings.discord_guild_id,
         settings.database_path,
         settings.scan_interval_minutes,
+        settings.facebook_marketplace_location,
     )
 
 

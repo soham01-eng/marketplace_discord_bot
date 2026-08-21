@@ -12,7 +12,7 @@ from discord.ext import commands, tasks
 
 from src.database import Database
 from src.notifier import DiscordNotifier
-from src.providers import MockProvider
+from src.providers import FacebookProvider, MockProvider
 from src.scanner import Scanner, ScanResult
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ class MarketplaceBot(commands.Bot):
         database: Database,
         scan_interval_minutes: int,
         scanner: Scanner | None = None,
+        facebook_marketplace_location: str = "detroit",
     ) -> None:
         intents = discord.Intents.default()
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
@@ -35,7 +36,10 @@ class MarketplaceBot(commands.Bot):
         self.scan_interval_minutes = scan_interval_minutes
         self.scanner = scanner or Scanner(
             database=database,
-            providers={"mock": MockProvider()},
+            providers={
+                "mock": MockProvider(),
+                "facebook": FacebookProvider(facebook_marketplace_location),
+            },
             notifier=DiscordNotifier(self),
         )
         self.scheduled_scan.change_interval(minutes=scan_interval_minutes)
@@ -90,6 +94,7 @@ def create_bot(
     database: Database,
     scan_interval_minutes: int = 30,
     scanner: Scanner | None = None,
+    facebook_marketplace_location: str = "detroit",
 ) -> MarketplaceBot:
     """Create a bot instance and register the MVP commands."""
     bot = MarketplaceBot(
@@ -97,6 +102,7 @@ def create_bot(
         database,
         scan_interval_minutes,
         scanner,
+        facebook_marketplace_location,
     )
     watch_group = app_commands.Group(
         name="watch",
@@ -107,11 +113,22 @@ def create_bot(
     @app_commands.describe(
         query="What to search for",
         max_price="Optional maximum listing price",
+        provider="Listing source (mock data by default)",
+    )
+    @app_commands.choices(
+        provider=[
+            app_commands.Choice(name="Mock (demo data)", value="mock"),
+            app_commands.Choice(
+                name="Facebook Marketplace (experimental)",
+                value="facebook",
+            ),
+        ]
     )
     async def add_watch(
         interaction: discord.Interaction,
         query: str,
         max_price: float | None = None,
+        provider: str = "mock",
     ) -> None:
         normalized_query = query.strip()
         if not normalized_query:
@@ -126,11 +143,18 @@ def create_bot(
                 ephemeral=True,
             )
             return
+        if provider not in {"mock", "facebook"}:
+            await interaction.response.send_message(
+                "Provider must be either mock or facebook.",
+                ephemeral=True,
+            )
+            return
 
         watch = bot.database.create_watch(
             discord_user_id=interaction.user.id,
             query=normalized_query,
             max_price=max_price,
+            provider=provider,
         )
         price_text = _format_max_price(watch.max_price)
         await interaction.response.send_message(
@@ -244,11 +268,17 @@ def run_bot(
     guild_id: int,
     database_path: str | Path,
     scan_interval_minutes: int = 30,
+    facebook_marketplace_location: str = "detroit",
 ) -> None:
     """Connect the configured bot to Discord."""
     database = Database(database_path)
     try:
-        bot = create_bot(guild_id, database, scan_interval_minutes)
+        bot = create_bot(
+            guild_id,
+            database,
+            scan_interval_minutes,
+            facebook_marketplace_location=facebook_marketplace_location,
+        )
         bot.run(token, log_handler=None)
     finally:
         database.close()

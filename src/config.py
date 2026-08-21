@@ -1,6 +1,7 @@
 """Environment-based application configuration."""
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ class Settings:
     discord_guild_id: int
     scan_interval_minutes: int
     database_path: Path
+    facebook_marketplace_location: str
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -40,11 +42,26 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     if not raw_database_path:
         raise ConfigurationError("DATABASE_PATH cannot be empty")
 
+    facebook_location = (
+        source.get(
+            "FACEBOOK_MARKETPLACE_LOCATION",
+            "detroit",
+        )
+        .strip()
+        .lower()
+    )
+    if not facebook_location or re.fullmatch(r"[a-z0-9-]+", facebook_location) is None:
+        raise ConfigurationError(
+            "FACEBOOK_MARKETPLACE_LOCATION must contain only letters, numbers, "
+            "and hyphens"
+        )
+
     return Settings(
         discord_token=token,
         discord_guild_id=guild_id,
         scan_interval_minutes=interval,
         database_path=Path(raw_database_path),
+        facebook_marketplace_location=facebook_location,
     )
 
 
