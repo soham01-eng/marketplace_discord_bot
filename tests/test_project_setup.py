@@ -1,13 +1,22 @@
-"""Smoke tests for the initial project scaffold."""
+"""Smoke tests for the Discord command scaffold."""
 
-import pytest
+from discord import app_commands
 
-from main import main
+from src.bot import create_bot
 
 
-def test_application_entry_point_runs(capsys: pytest.CaptureFixture[str]) -> None:
-    """The placeholder entry point should run before bot features are added."""
-    main()
+def test_bot_registers_planned_commands() -> None:
+    """The test guild should contain the complete MVP command surface."""
+    bot = create_bot(guild_id=123456789)
+    commands = {
+        command.name: command
+        for command in bot.tree.get_commands(guild=bot.development_guild)
+    }
 
-    captured = capsys.readouterr()
-    assert captured.out == "Marketplace Discord Bot project initialized.\n"
+    assert set(commands) == {"watch", "scan", "status"}
+    assert isinstance(commands["watch"], app_commands.Group)
+    assert {command.name for command in commands["watch"].commands} == {
+        "add",
+        "list",
+        "remove",
+    }
