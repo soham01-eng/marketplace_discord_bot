@@ -1,10 +1,13 @@
 """Discord bot and slash-command definitions."""
 
 import logging
+from pathlib import Path
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+from src.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -12,10 +15,11 @@ logger = logging.getLogger(__name__)
 class MarketplaceBot(commands.Bot):
     """Discord bot configured for rapid command syncing in one development server."""
 
-    def __init__(self, guild_id: int) -> None:
+    def __init__(self, guild_id: int, database: Database) -> None:
         intents = discord.Intents.default()
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.development_guild = discord.Object(id=guild_id)
+        self.database = database
 
     async def setup_hook(self) -> None:
         """Synchronize commands to the test server before the bot becomes ready."""
@@ -31,10 +35,17 @@ class MarketplaceBot(commands.Bot):
         if self.user is not None:
             logger.info("Bot connected as %s", self.user)
 
+    async def close(self) -> None:
+        """Close Discord and the local database connection."""
+        try:
+            await super().close()
+        finally:
+            self.database.close()
 
-def create_bot(guild_id: int) -> MarketplaceBot:
-    """Create a bot instance and register the MVP command placeholders."""
-    bot = MarketplaceBot(guild_id)
+
+def create_bot(guild_id: int, database: Database) -> MarketplaceBot:
+    """Create a bot instance and register the MVP commands."""
+    bot = MarketplaceBot(guild_id, database)
     watch_group = app_commands.Group(
         name="watch",
         description="Manage marketplace watches",
@@ -64,21 +75,38 @@ def create_bot(guild_id: int) -> MarketplaceBot:
             )
             return
 
-        price_text = (
-            f" with a maximum price of ${max_price:,.2f}"
-            if max_price is not None
-            else " with no maximum price"
+        watch = bot.database.create_watch(
+            discord_user_id=interaction.user.id,
+            query=normalized_query,
+            max_price=max_price,
         )
+        price_text = _format_max_price(watch.max_price)
         await interaction.response.send_message(
-            f'Watch preview created for "{normalized_query}"{price_text}. '
-            "Persistent storage will be added next.",
+            f'Saved watch #{watch.id} for "{watch.query}" '
+            f"({price_text}, provider: {watch.provider}).",
             ephemeral=True,
         )
 
     @watch_group.command(name="list", description="List your marketplace watches")
     async def list_watches(interaction: discord.Interaction) -> None:
+        watches = bot.database.list_watches(interaction.user.id)
+        if not watches:
+            await interaction.response.send_message(
+                "You do not have any watches yet. Use `/watch add` to create one.",
+                ephemeral=True,
+            )
+            return
+
+        displayed_watches = watches[:20]
+        lines = [
+            f'#{watch.id} — "{watch.query}" — {_format_max_price(watch.max_price)} '
+            f"— {watch.provider}"
+            for watch in displayed_watches
+        ]
+        if len(watches) > len(displayed_watches):
+            lines.append(f"…and {len(watches) - len(displayed_watches)} more.")
         await interaction.response.send_message(
-            "Watch listing is connected. Persistent watches will be added next.",
+            "Your watches:\n" + "\n".join(lines),
             ephemeral=True,
         )
 
@@ -94,11 +122,12 @@ def create_bot(guild_id: int) -> MarketplaceBot:
                 ephemeral=True,
             )
             return
-        await interaction.response.send_message(
-            f"Watch removal is connected for watch #{watch_id}. "
-            "Persistent storage will be added next.",
-            ephemeral=True,
-        )
+        removed = bot.database.delete_watch(watch_id, interaction.user.id)
+        if removed:
+            message = f"Removed watch #{watch_id}."
+        else:
+            message = f"Watch #{watch_id} was not found in your watches."
+        await interaction.response.send_message(message, ephemeral=True)
 
     bot.tree.add_command(watch_group, guild=bot.development_guild)
 
@@ -123,7 +152,7 @@ def create_bot(guild_id: int) -> MarketplaceBot:
         await interaction.response.send_message(
             "Bot: online\n"
             f"Discord latency: {latency_ms} ms\n"
-            "Database: not implemented\n"
+            "Database: connected\n"
             "Scanner: not implemented",
             ephemeral=True,
         )
@@ -147,7 +176,18 @@ def create_bot(guild_id: int) -> MarketplaceBot:
     return bot
 
 
-def run_bot(token: str, guild_id: int) -> None:
+def run_bot(token: str, guild_id: int, database_path: str | Path) -> None:
     """Connect the configured bot to Discord."""
-    bot = create_bot(guild_id)
-    bot.run(token, log_handler=None)
+    database = Database(database_path)
+    try:
+        bot = create_bot(guild_id, database)
+        bot.run(token, log_handler=None)
+    finally:
+        database.close()
+
+
+def _format_max_price(max_price: float | None) -> str:
+    """Format an optional watch price for Discord responses."""
+    if max_price is None:
+        return "no maximum price"
+    return f"maximum ${max_price:,.2f}"

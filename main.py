@@ -21,7 +21,11 @@ def main() -> None:
     except ConfigurationError as error:
         raise SystemExit(f"Configuration error: {error}") from error
 
-    run_bot(settings.discord_token, settings.discord_guild_id)
+    run_bot(
+        settings.discord_token,
+        settings.discord_guild_id,
+        settings.database_path,
+    )
 
 
 if __name__ == "__main__":

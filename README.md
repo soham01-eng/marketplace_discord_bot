@@ -9,9 +9,8 @@ Marketplace support will remain an experimental Playwright integration.
 
 ## Current status
 
-The Python project and local development environment are initialized. The
-initial Discord slash commands are available as testable placeholders while
-persistence and scanner behavior are developed.
+The Discord bot stores user-owned watches in a local SQLite database. The
+scanner and marketplace providers are the next development steps.
 
 ## Technology
 
@@ -69,8 +68,11 @@ The development server receives these slash commands:
 - `/scan`
 - `/status`
 
-The commands currently return placeholder responses. Database persistence and
-the listing scanner are separate development steps.
+`/watch add`, `/watch list`, and `/watch remove` persist watches between bot
+restarts. By default, local data is stored in `data/marketplace.db`; set
+`DATABASE_PATH` in `.env` to use another location. Database files are ignored
+by Git. `/scan` remains a placeholder until the provider and scanner steps are
+complete.
 
 ## Verify the setup
 

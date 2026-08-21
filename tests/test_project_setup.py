@@ -3,11 +3,13 @@
 from discord import app_commands
 
 from src.bot import create_bot
+from src.database import Database
 
 
-def test_bot_registers_planned_commands() -> None:
+def test_bot_registers_planned_commands(tmp_path) -> None:
     """The test guild should contain the complete MVP command surface."""
-    bot = create_bot(guild_id=123456789)
+    database = Database(tmp_path / "commands.db")
+    bot = create_bot(guild_id=123456789, database=database)
     commands = {
         command.name: command
         for command in bot.tree.get_commands(guild=bot.development_guild)
@@ -20,3 +22,4 @@ def test_bot_registers_planned_commands() -> None:
         "list",
         "remove",
     }
+    database.close()
