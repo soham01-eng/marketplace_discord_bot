@@ -16,3 +16,20 @@ class Watch:
     enabled: bool
     created_at: str
     last_checked: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class Listing:
+    """A marketplace-independent listing returned by every provider.
+
+    Price is ``None`` when a provider cannot safely determine it. Image URLs
+    are optional because some marketplaces do not expose an image for every
+    result.
+    """
+
+    external_id: str
+    title: str
+    price: float | None
+    url: str
+    image_url: str | None
+    source: str
