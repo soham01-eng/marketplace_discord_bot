@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 
 import discord
@@ -208,7 +209,7 @@ def create_bot(
     async def status(interaction: discord.Interaction) -> None:
         latency_ms = round(bot.latency * 1000)
         scanner_state = "running" if bot.scanner.is_running else "idle"
-        last_scan = bot.scanner.last_finished_at or "never"
+        last_scan = _format_last_scan(bot.scanner.last_finished_at)
         await interaction.response.send_message(
             "Bot: online\n"
             f"Discord latency: {latency_ms} ms\n"
@@ -258,3 +259,11 @@ def _format_max_price(max_price: float | None) -> str:
     if max_price is None:
         return "no maximum price"
     return f"maximum ${max_price:,.2f}"
+
+
+def _format_last_scan(timestamp: str | None) -> str:
+    """Format a scanner timestamp using Discord's viewer-local rendering."""
+    if timestamp is None:
+        return "never"
+    unix_timestamp = int(datetime.fromisoformat(timestamp).timestamp())
+    return f"<t:{unix_timestamp}:F> (<t:{unix_timestamp}:R>)"

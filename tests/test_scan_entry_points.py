@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock
 
-from src.bot import create_bot
+from src.bot import _format_last_scan, create_bot
 from src.database import Database
 from src.scanner import ScanResult
 
@@ -63,3 +63,10 @@ async def test_manual_and_scheduled_scans_use_same_scanner(tmp_path) -> None:
     assert scan_mock.await_count == 2
     assert bot.scheduled_scan.minutes == 15
     database.close()
+
+
+def test_last_scan_uses_discord_local_timestamp_format() -> None:
+    timestamp = "2026-08-21T03:07:45.948065+00:00"
+
+    assert _format_last_scan(None) == "never"
+    assert _format_last_scan(timestamp) == ("<t:1787281665:F> (<t:1787281665:R>)")
