@@ -3,6 +3,7 @@
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 
 class ConfigurationError(ValueError):
@@ -16,6 +17,7 @@ class Settings:
     discord_token: str
     discord_guild_id: int
     scan_interval_minutes: int
+    database_path: Path
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -34,10 +36,15 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     if not 15 <= interval <= 45:
         raise ConfigurationError("SCAN_INTERVAL_MINUTES must be between 15 and 45")
 
+    raw_database_path = source.get("DATABASE_PATH", "data/marketplace.db").strip()
+    if not raw_database_path:
+        raise ConfigurationError("DATABASE_PATH cannot be empty")
+
     return Settings(
         discord_token=token,
         discord_guild_id=guild_id,
         scan_interval_minutes=interval,
+        database_path=Path(raw_database_path),
     )
 
 
