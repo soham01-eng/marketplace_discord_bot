@@ -271,13 +271,13 @@ def _listing_title(card: _RawListingCard) -> str | None:
     """Prefer accessible labels, then visible card text, then useful image alt text."""
     candidates = [card.aria_label, *card.text_parts, card.image_alt]
     for candidate in candidates:
-        title = _clean_title_candidate(candidate)
+        title = _clean_title_candidate(candidate, card.listing_id)
         if title is not None:
             return title
     return None
 
 
-def _clean_title_candidate(value: str | None) -> str | None:
+def _clean_title_candidate(value: str | None, listing_id: str) -> str | None:
     text = _clean_text(value)
     if text is None:
         return None
@@ -288,6 +288,16 @@ def _clean_title_candidate(value: str | None) -> str | None:
             text = text[len(prefix) :].strip()
             lowered = text.casefold()
             break
+
+    parts = [part.strip() for part in text.split(",")]
+    listing_marker = re.fullmatch(
+        rf"listing\s*:?\s*{re.escape(listing_id)}",
+        parts[-1],
+        flags=re.IGNORECASE,
+    )
+    if listing_marker is not None:
+        title_parts = parts[:-3] if len(parts) >= 4 else parts[:-1]
+        text = ", ".join(part for part in title_parts if part).strip()
 
     text = _PRICE_PATTERN.sub("", text).strip(" -|·,")
     lowered = text.casefold()

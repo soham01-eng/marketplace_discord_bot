@@ -87,6 +87,21 @@ def test_parser_reports_listing_without_usable_title() -> None:
         parse_facebook_search_html(html)
 
 
+def test_parser_removes_accessibility_location_suffix_from_title() -> None:
+    html = """
+    <a
+      href="/marketplace/item/123456789/"
+      aria-label="Marketplace listing: Vintage chair, ergonomic, Detroit, MI, listing 123456789"
+    >
+      <span>$50</span>
+    </a>
+    """
+
+    listings = parse_facebook_search_html(html)
+
+    assert listings[0].title == "Vintage chair, ergonomic"
+
+
 @pytest.mark.asyncio
 async def test_provider_uses_shared_contract_and_encodes_search_query() -> None:
     requested: list[tuple[str, int]] = []
