@@ -61,7 +61,12 @@ def _listing(
 
 async def test_scanner_notifies_once_and_updates_last_checked(tmp_path) -> None:
     database = Database(tmp_path / "scanner.db")
-    watch = database.create_watch(101, "office chair", max_price=150)
+    watch = database.create_watch(
+        101,
+        "office chair",
+        max_price=150,
+        provider="mock",
+    )
     provider = FakeProvider(
         [
             _listing(),
@@ -119,7 +124,7 @@ async def test_provider_failure_does_not_stop_other_watches(tmp_path) -> None:
 
 async def test_listing_is_saved_before_failed_notification(tmp_path) -> None:
     database = Database(tmp_path / "scanner.db")
-    watch = database.create_watch(101, "office chair")
+    watch = database.create_watch(101, "office chair", provider="mock")
     scanner = Scanner(
         database,
         {"mock": FakeProvider([_listing()])},

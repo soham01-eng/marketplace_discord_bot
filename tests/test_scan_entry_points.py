@@ -39,6 +39,7 @@ async def test_manual_and_scheduled_scans_use_same_scanner(tmp_path) -> None:
     database = Database(tmp_path / "commands.db")
     bot = create_bot(
         guild_id=123456789,
+        marketplace_channel_id=987654321,
         database=database,
         scan_interval_minutes=15,
     )

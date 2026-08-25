@@ -12,12 +12,14 @@ def test_load_settings_accepts_valid_values() -> None:
         {
             "DISCORD_TOKEN": "example-token",
             "DISCORD_GUILD_ID": "123456789",
+            "DISCORD_MARKETPLACE_CHANNEL_ID": "987654321",
             "SCAN_INTERVAL_MINUTES": "30",
         }
     )
 
     assert settings.discord_token == "example-token"
     assert settings.discord_guild_id == 123456789
+    assert settings.discord_marketplace_channel_id == 987654321
     assert settings.scan_interval_minutes == 30
     assert settings.database_path == Path("data/marketplace.db")
     assert settings.facebook_marketplace_location == "detroit"
@@ -28,6 +30,7 @@ def test_load_settings_accepts_custom_database_path() -> None:
         {
             "DISCORD_TOKEN": "example-token",
             "DISCORD_GUILD_ID": "123456789",
+            "DISCORD_MARKETPLACE_CHANNEL_ID": "987654321",
             "DATABASE_PATH": "custom/watches.sqlite3",
         }
     )
@@ -40,6 +43,7 @@ def test_load_settings_accepts_custom_facebook_location() -> None:
         {
             "DISCORD_TOKEN": "example-token",
             "DISCORD_GUILD_ID": "123456789",
+            "DISCORD_MARKETPLACE_CHANNEL_ID": "987654321",
             "FACEBOOK_MARKETPLACE_LOCATION": "Ann-Arbor",
         }
     )
@@ -47,11 +51,19 @@ def test_load_settings_accepts_custom_facebook_location() -> None:
     assert settings.facebook_marketplace_location == "ann-arbor"
 
 
-@pytest.mark.parametrize("missing_name", ["DISCORD_TOKEN", "DISCORD_GUILD_ID"])
+@pytest.mark.parametrize(
+    "missing_name",
+    [
+        "DISCORD_TOKEN",
+        "DISCORD_GUILD_ID",
+        "DISCORD_MARKETPLACE_CHANNEL_ID",
+    ],
+)
 def test_load_settings_rejects_missing_required_values(missing_name: str) -> None:
     environment = {
         "DISCORD_TOKEN": "example-token",
         "DISCORD_GUILD_ID": "123456789",
+        "DISCORD_MARKETPLACE_CHANNEL_ID": "987654321",
     }
     environment.pop(missing_name)
 
@@ -66,6 +78,7 @@ def test_load_settings_rejects_invalid_scan_intervals(interval: str) -> None:
             {
                 "DISCORD_TOKEN": "example-token",
                 "DISCORD_GUILD_ID": "123456789",
+                "DISCORD_MARKETPLACE_CHANNEL_ID": "987654321",
                 "SCAN_INTERVAL_MINUTES": interval,
             }
         )
@@ -78,6 +91,7 @@ def test_load_settings_rejects_invalid_facebook_location(location: str) -> None:
             {
                 "DISCORD_TOKEN": "example-token",
                 "DISCORD_GUILD_ID": "123456789",
+                "DISCORD_MARKETPLACE_CHANNEL_ID": "987654321",
                 "FACEBOOK_MARKETPLACE_LOCATION": location,
             }
         )
