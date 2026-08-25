@@ -1,5 +1,7 @@
 """Tests for SQLite watch persistence and listing deduplication."""
 
+import sqlite3
+
 from src.database import Database
 
 
@@ -21,7 +23,8 @@ def test_watch_crud_persists_across_connections(tmp_path) -> None:
     assert first_watch.id > 0
     assert first_watch.query == "standing desk"
     assert first_watch.max_price == 250
-    assert first_watch.provider == "mock"
+    assert first_watch.provider == "facebook"
+    assert first_watch.discord_thread_id is None
     assert first_watch.enabled is True
     assert first_watch.last_checked is None
     assert [watch.id for watch in database.list_watches(101)] == [first_watch.id]
@@ -40,6 +43,61 @@ def test_watch_can_only_be_deleted_by_its_owner(tmp_path) -> None:
 
     assert database.delete_watch(watch.id, discord_user_id=202) is False
     assert database.list_watches(101) == [watch]
+    database.close()
+
+
+def test_watch_thread_is_persisted_and_respects_ownership(tmp_path) -> None:
+    database = Database(tmp_path / "marketplace.db")
+    watch = database.create_watch(discord_user_id=101, query="bicycle")
+
+    assert database.get_watch(watch.id, discord_user_id=202) is None
+    assert database.update_watch_thread_id(watch.id, 987654321)
+    stored_watch = database.get_watch(watch.id, discord_user_id=101)
+
+    assert stored_watch is not None
+    assert stored_watch.discord_thread_id == 987654321
+    database.close()
+
+
+def test_existing_database_is_migrated_without_losing_watches(tmp_path) -> None:
+    database_path = tmp_path / "existing.db"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE watches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discord_user_id INTEGER NOT NULL,
+            query TEXT NOT NULL,
+            min_price REAL,
+            max_price REAL,
+            provider TEXT NOT NULL,
+            enabled INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            last_checked TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO watches (
+            discord_user_id,
+            query,
+            provider,
+            enabled,
+            created_at
+        )
+        VALUES (101, 'office chair', 'mock', 1, '2026-08-21T00:00:00+00:00')
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(database_path)
+    watches = database.list_watches(101)
+
+    assert len(watches) == 1
+    assert watches[0].query == "office chair"
+    assert watches[0].discord_thread_id is None
     database.close()
 
 

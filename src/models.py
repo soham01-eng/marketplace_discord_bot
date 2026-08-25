@@ -16,6 +16,7 @@ class Watch:
     enabled: bool
     created_at: str
     last_checked: str | None
+    discord_thread_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

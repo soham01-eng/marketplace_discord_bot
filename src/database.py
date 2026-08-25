@@ -27,6 +27,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS watches (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 discord_user_id INTEGER NOT NULL,
+                discord_thread_id INTEGER,
                 query TEXT NOT NULL,
                 min_price REAL,
                 max_price REAL,
@@ -58,7 +59,19 @@ class Database:
             );
             """
         )
+        self._add_missing_watch_columns()
         self._connection.commit()
+
+    def _add_missing_watch_columns(self) -> None:
+        """Apply additive migrations needed by existing local databases."""
+        columns = {
+            row["name"]
+            for row in self._connection.execute("PRAGMA table_info(watches)")
+        }
+        if "discord_thread_id" not in columns:
+            self._connection.execute(
+                "ALTER TABLE watches ADD COLUMN discord_thread_id INTEGER"
+            )
 
     def create_watch(
         self,
@@ -67,7 +80,7 @@ class Database:
         max_price: float | None = None,
         *,
         min_price: float | None = None,
-        provider: str = "mock",
+        provider: str = "facebook",
     ) -> Watch:
         """Persist a watch and return its complete stored representation."""
         created_at = _utc_now()
@@ -101,6 +114,18 @@ class Database:
         if row is None:  # pragma: no cover - SQLite returns the inserted row.
             raise RuntimeError("The newly created watch could not be loaded")
         return _watch_from_row(row)
+
+    def get_watch(self, watch_id: int, discord_user_id: int) -> Watch | None:
+        """Return an owned watch, or none when it is missing or belongs to another user."""
+        row = self._connection.execute(
+            """
+            SELECT *
+            FROM watches
+            WHERE id = ? AND discord_user_id = ?
+            """,
+            (watch_id, discord_user_id),
+        ).fetchone()
+        return None if row is None else _watch_from_row(row)
 
     def list_watches(self, discord_user_id: int) -> list[Watch]:
         """Return a user's watches in creation order."""
@@ -141,6 +166,19 @@ class Database:
             WHERE id = ?
             """,
             (timestamp, watch_id),
+        )
+        self._connection.commit()
+        return cursor.rowcount == 1
+
+    def update_watch_thread_id(self, watch_id: int, thread_id: int) -> bool:
+        """Associate a Discord alert thread with an existing watch."""
+        cursor = self._connection.execute(
+            """
+            UPDATE watches
+            SET discord_thread_id = ?
+            WHERE id = ?
+            """,
+            (thread_id, watch_id),
         )
         self._connection.commit()
         return cursor.rowcount == 1
@@ -231,6 +269,7 @@ def _watch_from_row(row: sqlite3.Row) -> Watch:
         enabled=bool(row["enabled"]),
         created_at=row["created_at"],
         last_checked=row["last_checked"],
+        discord_thread_id=row["discord_thread_id"],
     )
 
 

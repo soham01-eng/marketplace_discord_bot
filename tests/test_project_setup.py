@@ -10,7 +10,11 @@ from src.providers import FacebookProvider, MockProvider
 def test_bot_registers_planned_commands(tmp_path) -> None:
     """The test guild should contain the complete MVP command surface."""
     database = Database(tmp_path / "commands.db")
-    bot = create_bot(guild_id=123456789, database=database)
+    bot = create_bot(
+        guild_id=123456789,
+        marketplace_channel_id=987654321,
+        database=database,
+    )
     commands = {
         command.name: command
         for command in bot.tree.get_commands(guild=bot.development_guild)

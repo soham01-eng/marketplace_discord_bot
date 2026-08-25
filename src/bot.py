@@ -24,6 +24,7 @@ class MarketplaceBot(commands.Bot):
     def __init__(
         self,
         guild_id: int,
+        marketplace_channel_id: int,
         database: Database,
         scan_interval_minutes: int,
         scanner: Scanner | None = None,
@@ -32,15 +33,21 @@ class MarketplaceBot(commands.Bot):
         intents = discord.Intents.default()
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.development_guild = discord.Object(id=guild_id)
+        self.marketplace_channel_id = marketplace_channel_id
         self.database = database
         self.scan_interval_minutes = scan_interval_minutes
+        self.discord_notifier = DiscordNotifier(
+            self,
+            database,
+            marketplace_channel_id,
+        )
         self.scanner = scanner or Scanner(
             database=database,
             providers={
                 "mock": MockProvider(),
                 "facebook": FacebookProvider(facebook_marketplace_location),
             },
-            notifier=DiscordNotifier(self),
+            notifier=self.discord_notifier,
         )
         self.scheduled_scan.change_interval(minutes=scan_interval_minutes)
 
@@ -91,6 +98,7 @@ class MarketplaceBot(commands.Bot):
 
 def create_bot(
     guild_id: int,
+    marketplace_channel_id: int,
     database: Database,
     scan_interval_minutes: int = 30,
     scanner: Scanner | None = None,
@@ -99,6 +107,7 @@ def create_bot(
     """Create a bot instance and register the MVP commands."""
     bot = MarketplaceBot(
         guild_id,
+        marketplace_channel_id,
         database,
         scan_interval_minutes,
         scanner,
@@ -113,22 +122,22 @@ def create_bot(
     @app_commands.describe(
         query="What to search for",
         max_price="Optional maximum listing price",
-        provider="Listing source (mock data by default)",
+        provider="Listing source (Facebook by default)",
     )
     @app_commands.choices(
         provider=[
-            app_commands.Choice(name="Mock (demo data)", value="mock"),
             app_commands.Choice(
                 name="Facebook Marketplace (experimental)",
                 value="facebook",
             ),
+            app_commands.Choice(name="Mock (demo data)", value="mock"),
         ]
     )
     async def add_watch(
         interaction: discord.Interaction,
         query: str,
         max_price: float | None = None,
-        provider: str = "mock",
+        provider: str = "facebook",
     ) -> None:
         normalized_query = query.strip()
         if not normalized_query:
@@ -150,16 +159,29 @@ def create_bot(
             )
             return
 
+        await interaction.response.defer(ephemeral=True, thinking=True)
         watch = bot.database.create_watch(
             discord_user_id=interaction.user.id,
             query=normalized_query,
             max_price=max_price,
             provider=provider,
         )
+        try:
+            thread = await bot.discord_notifier.ensure_watch_thread(watch)
+        except Exception:
+            bot.database.delete_watch(watch.id, interaction.user.id)
+            logger.exception("Could not create Discord thread for watch %s", watch.id)
+            await interaction.followup.send(
+                "The watch could not be saved because its alert thread could not "
+                "be created. Check the configured channel and bot permissions.",
+                ephemeral=True,
+            )
+            return
+
         price_text = _format_max_price(watch.max_price)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f'Saved watch #{watch.id} for "{watch.query}" '
-            f"({price_text}, provider: {watch.provider}).",
+            f"({price_text}, provider: {watch.provider}). Alerts: <#{thread.id}>",
             ephemeral=True,
         )
 
@@ -198,11 +220,22 @@ def create_bot(
                 ephemeral=True,
             )
             return
+        watch = bot.database.get_watch(watch_id, interaction.user.id)
+        if watch is None:
+            await interaction.response.send_message(
+                f"Watch #{watch_id} was not found in your watches.",
+                ephemeral=True,
+            )
+            return
+
         removed = bot.database.delete_watch(watch_id, interaction.user.id)
+        message = f"Removed watch #{watch_id}."
         if removed:
-            message = f"Removed watch #{watch_id}."
-        else:
-            message = f"Watch #{watch_id} was not found in your watches."
+            try:
+                await bot.discord_notifier.archive_watch_thread(watch)
+            except Exception:
+                logger.exception("Could not archive thread for watch %s", watch_id)
+                message += " Its Discord thread could not be archived."
         await interaction.response.send_message(message, ephemeral=True)
 
     bot.tree.add_command(watch_group, guild=bot.development_guild)
@@ -266,6 +299,7 @@ def create_bot(
 def run_bot(
     token: str,
     guild_id: int,
+    marketplace_channel_id: int,
     database_path: str | Path,
     scan_interval_minutes: int = 30,
     facebook_marketplace_location: str = "detroit",
@@ -275,6 +309,7 @@ def run_bot(
     try:
         bot = create_bot(
             guild_id,
+            marketplace_channel_id,
             database,
             scan_interval_minutes,
             facebook_marketplace_location=facebook_marketplace_location,

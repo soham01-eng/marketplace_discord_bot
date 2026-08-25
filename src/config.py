@@ -17,6 +17,7 @@ class Settings:
 
     discord_token: str
     discord_guild_id: int
+    discord_marketplace_channel_id: int
     scan_interval_minutes: int
     database_path: Path
     facebook_marketplace_location: str
@@ -31,6 +32,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         raise ConfigurationError("DISCORD_TOKEN is missing from .env")
 
     guild_id = _positive_integer(source.get("DISCORD_GUILD_ID"), "DISCORD_GUILD_ID")
+    marketplace_channel_id = _positive_integer(
+        source.get("DISCORD_MARKETPLACE_CHANNEL_ID"),
+        "DISCORD_MARKETPLACE_CHANNEL_ID",
+    )
     interval = _positive_integer(
         source.get("SCAN_INTERVAL_MINUTES", "30"),
         "SCAN_INTERVAL_MINUTES",
@@ -59,6 +64,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     return Settings(
         discord_token=token,
         discord_guild_id=guild_id,
+        discord_marketplace_channel_id=marketplace_channel_id,
         scan_interval_minutes=interval,
         database_path=Path(raw_database_path),
         facebook_marketplace_location=facebook_location,

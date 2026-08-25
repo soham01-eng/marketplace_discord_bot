@@ -5,8 +5,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 A local-first Python bot that turns Discord slash commands into persistent
-marketplace watches and sends direct-message alerts for newly discovered
-listings.
+marketplace watches and organizes newly discovered listings in one Discord
+thread per watch.
 
 The project is a completed, resume-focused MVP built to demonstrate Discord
 bot development, asynchronous workflows, SQLite persistence, browser
@@ -18,7 +18,7 @@ is unavailable.
 
 | Create a persistent watch | Receive a new-listing alert |
 |:---:|:---:|
-| ![Discord confirmation after creating an office chair watch](docs/screenshots/watch-command.png) | ![Discord direct-message embed for a matching office chair](docs/screenshots/listing-notification.png) |
+| ![Discord confirmation after creating an office chair watch](docs/screenshots/watch-command.png) | ![Discord listing embed for a matching office chair](docs/screenshots/listing-notification.png) |
 
 ## Features
 
@@ -30,8 +30,10 @@ is unavailable.
 - Apply case-insensitive, all-words query matching and an optional maximum
   price.
 - Prevent duplicate alerts using stable, provider-specific listing IDs.
-- Send new matches as Discord direct-message embeds with title, price, source,
-  link, and an optional image.
+- Create one public Discord thread per watch and send new matches there as
+  embeds with title, price, source, link, and an optional image.
+- Mention the watch owner on new matches while keeping watches and alerts
+  visible to both users in the private server.
 - Isolate failures so one unavailable provider or failed notification does not
   stop the remaining watches.
 - Switch between a reliable `MockProvider` and an experimental anonymous-first
@@ -53,7 +55,7 @@ flowchart TD
     Providers --> Facebook["FacebookProvider\nPlaywright"]
     Scanner --> Filters["Query + price filters"]
     Filters --> Dedupe["Stable-ID deduplication"]
-    Dedupe --> Notify["Discord DM embed"]
+    Dedupe --> Thread["Watch-specific Discord thread"]
     Dedupe --> DB
 ```
 
@@ -83,8 +85,9 @@ local JSON fixture, Facebook Marketplace, or a future provider.
 3. Request normalized listings from the provider.
 4. Apply query and maximum-price filters.
 5. Save each new stable listing ID before notifying the owner.
-6. Send a Discord DM for each newly saved match.
-7. Record the scan result and continue past isolated failures.
+6. Resolve or recreate the watch's Discord thread.
+7. Post an owner mention and embed for each newly saved match.
+8. Record the scan result and continue past isolated failures.
 
 ## Providers
 
@@ -93,9 +96,9 @@ local JSON fixture, Facebook Marketplace, or a future provider.
 | `mock` | Repeatable development, tests, and portfolio demos | No | Deterministic and supported |
 | `facebook` | Anonymous Marketplace access experiment | Yes | Experimental; access and markup can change |
 
-`MockProvider` reads tracked records from `data/sample_listings.json`. It is the
-default for new watches and keeps the complete bot workflow useful without an
-external dependency.
+`MockProvider` reads tracked records from `data/sample_listings.json`. It is an
+explicit demo and test choice that keeps the complete workflow useful without
+an external dependency.
 
 `FacebookProvider` opens one bounded, location-scoped search page in a
 temporary headless Chromium session. It identifies stable
@@ -106,21 +109,24 @@ Facebook credentials, cookies, or persistent browser profile.
 Facebook may redirect anonymous browsers to login, present a challenge, time
 out, or change its markup. These states produce clear provider errors; the
 scanner records a failure for that watch and continues. The implementation does
-not attempt CAPTCHA solving, proxy rotation, fingerprint spoofing, checkpoint
+not silently substitute mock listings after a Facebook failure and does not
+attempt CAPTCHA solving, proxy rotation, fingerprint spoofing, checkpoint
 circumvention, or other anti-bot bypasses.
 
 ## Discord commands
 
 | Command | Options | Result |
 |---|---|---|
-| `/watch add` | `query`, optional `max_price`, optional `provider` | Saves a user-owned watch; `mock` is the default provider |
+| `/watch add` | `query`, optional `max_price`, optional `provider` | Saves an owned watch, defaults to `facebook`, and creates its alert thread |
 | `/watch list` | None | Lists the requesting user's watches and numeric IDs |
-| `/watch remove` | `watch_id` | Removes only a watch owned by the requesting user |
+| `/watch remove` | `watch_id` | Removes only an owned watch and archives its alert thread |
 | `/scan` | None | Runs all enabled watches immediately and reports totals |
 | `/status` | None | Shows bot, database, scanner, interval, and last-scan status |
 
-Command responses are ephemeral. Matching-listing notifications are sent as
-direct messages.
+Command responses are ephemeral. Each watch has one public thread beneath the
+configured marketplace text channel. Matching listings are posted in that
+thread; archived threads automatically become active when a new alert arrives.
+If a stored thread was deleted, the bot creates and stores a replacement.
 
 ## Local setup
 
@@ -177,10 +183,13 @@ The reliable mock demo does not make network requests or require a browser.
 1. Create an application in the
    [Discord Developer Portal](https://discord.com/developers/applications).
 2. Open **Bot**, reset the token, and copy it directly into your local `.env`.
-3. Enable Developer Mode in Discord and copy your private test server's ID.
-4. Under the application's **Installation** settings, enable **Guild Install**.
-5. Add the `applications.commands` and `bot` scopes.
-6. Grant **View Channels**, **Send Messages**, and **Embed Links**, then install
+3. Create a text channel such as `#marketplace` in the private server.
+4. Enable Developer Mode in Discord and copy both the server ID and the
+   `#marketplace` channel ID.
+5. Under the application's **Installation** settings, enable **Guild Install**.
+6. Add the `applications.commands` and `bot` scopes.
+7. Grant **View Channels**, **Send Messages**, **Embed Links**, **Create Public
+   Threads**, **Send Messages in Threads**, and **Manage Threads**, then install
    the application in the test server.
 
 No privileged Discord intents are required. Never paste the bot token into an
@@ -191,6 +200,7 @@ issue, screenshot, terminal transcript, or commit.
 ```dotenv
 DISCORD_TOKEN=replace_with_your_bot_token
 DISCORD_GUILD_ID=replace_with_your_test_server_id
+DISCORD_MARKETPLACE_CHANNEL_ID=replace_with_your_marketplace_channel_id
 SCAN_INTERVAL_MINUTES=30
 DATABASE_PATH=data/marketplace.db
 FACEBOOK_MARKETPLACE_LOCATION=detroit
@@ -200,6 +210,7 @@ FACEBOOK_MARKETPLACE_LOCATION=detroit
 |---|---:|---|---|
 | `DISCORD_TOKEN` | Yes | — | Secret bot token from the Developer Portal |
 | `DISCORD_GUILD_ID` | Yes | — | Server where development slash commands are synchronized |
+| `DISCORD_MARKETPLACE_CHANNEL_ID` | Yes | — | Parent text channel where the bot creates watch threads |
 | `SCAN_INTERVAL_MINUTES` | No | `30` | Scheduled interval; validated between 15 and 45 minutes |
 | `DATABASE_PATH` | No | `data/marketplace.db` | Local SQLite database path |
 | `FACEBOOK_MARKETPLACE_LOCATION` | No | `detroit` | Marketplace URL location slug, such as `ann-arbor` |
@@ -226,7 +237,7 @@ Use the mock provider for a repeatable end-to-end demonstration:
    - `max_price`: `150`
    - `provider`: `Mock (demo data)`
 3. Run `/scan`.
-4. Confirm the DM for the $125 Herman Miller Office Chair.
+4. Open the watch thread and confirm the $125 Herman Miller Office Chair alert.
 5. Run `/scan` again and confirm it sends no duplicate notification.
 6. Restart the bot and use `/watch list` to confirm SQLite persistence.
 
@@ -250,11 +261,11 @@ python -m pytest
 ```
 
 The test suite covers configuration validation, database ownership and
-persistence, provider normalization, saved Facebook HTML parsing, filters,
-deduplication, notification embeds, shared scan entry points, failure
-isolation, command behavior, and scheduling. CI runs the dependency, lint,
-format, and pytest checks on Python 3.11 and 3.14 without Discord secrets,
-Chromium, or live Facebook access.
+persistence, schema migration, provider normalization, saved Facebook HTML
+parsing, filters, deduplication, watch-thread routing, notification embeds,
+shared scan entry points, failure isolation, command behavior, and scheduling.
+CI runs the dependency, lint, format, and pytest checks on Python 3.11 and 3.14
+without Discord secrets, Chromium, or live Facebook access.
 
 ## Project structure
 
@@ -270,7 +281,7 @@ marketplace_discord_bot/
 │   ├── database.py               # SQLite watches and seen listings
 │   ├── filters.py                # Provider-independent matching rules
 │   ├── models.py                 # Normalized Watch and Listing models
-│   ├── notifier.py               # Discord DM embeds
+│   ├── notifier.py               # Watch threads and Discord listing embeds
 │   └── scanner.py                # Shared orchestration and failure isolation
 ├── tests/                        # Deterministic unit and integration tests
 ├── .github/workflows/ci.yml      # Python 3.11 and 3.14 quality gate
@@ -283,10 +294,11 @@ marketplace_discord_bot/
 | Decision | Reason | Tradeoff |
 |---|---|---|
 | Discord as the complete UI | Delivers commands and notifications without a separate frontend or hosting bill | Requires a Discord account and server |
+| One public thread per watch | Groups alerts and discussion by search while keeping the parent channel readable | Requires thread permissions and one stored Discord thread ID per watch |
 | SQLite for persistence | Zero-cost, durable, and appropriate for one or two local users | Not intended for distributed bot instances |
 | Shared scanner for manual and scheduled runs | Keeps matching, deduplication, and errors consistent | Scans are serialized through one asynchronous lock |
 | Provider normalization boundary | Keeps marketplace markup out of bot, storage, and notification code | Each new provider needs an adapter and parser tests |
-| Save before notifying | Prevents duplicate alerts across restarts and repeated scans | A failed DM is recorded as seen and is not retried |
+| Save before notifying | Prevents duplicate alerts across restarts and repeated scans | A failed thread notification is recorded as seen and is not retried |
 | Saved HTML fixture in CI | Tests Facebook parsing without unstable live access | The fixture cannot guarantee current anonymous access |
 | Local-first deployment | Meets the $0 MVP constraint and keeps secrets on the owner's PC | Scanning stops when the computer or process is offline |
 
@@ -297,7 +309,8 @@ marketplace_discord_bot/
 - Polling is not real time. Results arrive on the configured interval or after
   a manual `/scan`.
 - The MVP synchronizes slash commands to one configured development server.
-- A user must allow direct messages from the server to receive listing alerts.
+- Watch threads are public to members who can access the configured parent
+  channel; per-user private alerts are not part of the MVP.
 - Query matching requires every whitespace-separated query word to appear in
   the listing title; advanced include/exclude filters are not exposed yet.
 - Watches can be created, listed, and removed, but not edited, paused, or
@@ -313,6 +326,8 @@ marketplace_discord_bot/
   location controls.
 - Add notification retry state without reintroducing duplicate alerts.
 - Add provider health details and recent failure summaries to `/status`.
+- Consider a forum channel with watch-status tags if the number of active
+  watches grows enough to justify the extra management.
 - Support another documented provider through the same interface.
 - Package an optional always-on deployment path while preserving local use.
 
