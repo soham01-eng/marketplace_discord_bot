@@ -27,6 +27,8 @@ is unavailable.
 - Persist watches and seen listing IDs in SQLite across bot restarts.
 - Run scans manually with `/scan` or automatically every 30 minutes by
   default.
+- Optionally start the local bot at Windows sign-in through the included Task
+  Scheduler setup script.
 - Apply case-insensitive, all-words query matching and an optional maximum
   price.
 - Prevent duplicate alerts using stable, provider-specific listing IDs.
@@ -220,12 +222,54 @@ Git.
 
 ### 5. Run the bot
 
-```bash
+The local runtime supports both manual and automatic Windows launch. Manual
+launch remains the development and troubleshooting path.
+
+#### Manual launch
+
+With the virtual environment activated:
+
+```powershell
 python main.py
 ```
 
 The bot synchronizes commands to the configured test server, connects to
-Discord, and starts the scheduled scanner. Stop it with `Ctrl+C`.
+Discord, and starts the scheduled scanner. Keep the PowerShell window open and
+press `Ctrl+C` to stop it.
+
+#### Automatic startup on Windows
+
+From the repository root, register the bot with Windows Task Scheduler and
+start it immediately:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_windows_task.ps1 -StartNow
+```
+
+The script creates a task named `Marketplace Discord Bot` for the current
+Windows user. It starts at sign-in, runs the virtual environment's Python
+directly, waits for a network connection, retries a failed process three times,
+has no execution time limit, and prevents a second scheduled instance.
+
+Registration can be performed without immediately starting the bot by omitting
+`-StartNow`. Manage the registered task with:
+
+```powershell
+Get-ScheduledTask -TaskName "Marketplace Discord Bot"
+Start-ScheduledTask -TaskName "Marketplace Discord Bot"
+Stop-ScheduledTask -TaskName "Marketplace Discord Bot"
+```
+
+Remove only the scheduled task with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_windows_task.ps1 -Remove
+```
+
+Stop the scheduled task before launching `main.py` manually. Running two bot
+processes can cause duplicate scans, duplicate notifications, or SQLite
+conflicts. Automatic startup still requires the computer to remain powered on,
+connected to the internet, and awake; the display may turn off.
 
 ## Reliable demo walkthrough
 
@@ -273,7 +317,7 @@ without Discord secrets, Chromium, or live Facebook access.
 marketplace_discord_bot/
 ├── data/                         # Tracked mock data; local database is ignored
 ├── docs/screenshots/             # Sanitized Discord portfolio images
-├── scripts/                      # Standalone Facebook access experiment
+├── scripts/                      # Facebook access check and Windows startup setup
 ├── src/
 │   ├── providers/                # Provider contract, mock, and Facebook
 │   ├── bot.py                    # Discord commands and scheduled entry point
@@ -301,6 +345,7 @@ marketplace_discord_bot/
 | Save before notifying | Prevents duplicate alerts across restarts and repeated scans | A failed thread notification is recorded as seen and is not retried |
 | Saved HTML fixture in CI | Tests Facebook parsing without unstable live access | The fixture cannot guarantee current anonymous access |
 | Local-first deployment | Meets the $0 MVP constraint and keeps secrets on the owner's PC | Scanning stops when the computer or process is offline |
+| Optional Windows auto-start | Task Scheduler starts the bot at sign-in and retries process failures | The PC must remain on and awake; this is not independent hosting |
 
 ## Known limitations
 
@@ -308,6 +353,8 @@ marketplace_discord_bot/
   location, network, and future Marketplace changes.
 - Polling is not real time. Results arrive on the configured interval or after
   a manual `/scan`.
+- Windows automatic startup does not run while the computer is shut down or
+  asleep.
 - The MVP synchronizes slash commands to one configured development server.
 - Watch threads are public to members who can access the configured parent
   channel; per-user private alerts are not part of the MVP.
