@@ -160,7 +160,8 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-The execution-policy change applies only to the current PowerShell window.
+The execution-policy change applies only to the current PowerShell window. It
+does not permanently change the system policy or require an administrator.
 
 macOS or Linux:
 
@@ -227,11 +228,17 @@ launch remains the development and troubleshooting path.
 
 #### Manual launch
 
-With the virtual environment activated:
+From the repository root, use this sequence in each new PowerShell window:
 
 ```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
 python main.py
 ```
+
+Because the bypass is scoped to the current process, repeat the first command
+after opening a new PowerShell window if script execution is blocked. A
+successful activation adds `(.venv)` to the command prompt.
 
 The bot synchronizes commands to the configured test server, connects to
 Discord, and starts the scheduled scanner. Keep the PowerShell window open and
