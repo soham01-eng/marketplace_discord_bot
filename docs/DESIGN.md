@@ -148,8 +148,7 @@ All providers implement one asynchronous contract:
 ```python
 class ListingProvider(ABC):
     @abstractmethod
-    async def search(self, watch: Watch) -> list[Listing]:
-        ...
+    async def search(self, watch: Watch) -> list[Listing]: ...
 ```
 
 They return the same immutable data model:
