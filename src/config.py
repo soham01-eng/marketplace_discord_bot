@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.geo import SearchArea
+
 
 class ConfigurationError(ValueError):
     """Raised when required application configuration is missing or invalid."""
@@ -21,6 +23,7 @@ class Settings:
     scan_interval_minutes: int
     database_path: Path
     facebook_marketplace_location: str
+    facebook_search_area: SearchArea | None = None
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -68,7 +71,31 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         scan_interval_minutes=interval,
         database_path=Path(raw_database_path),
         facebook_marketplace_location=facebook_location,
+        facebook_search_area=load_search_area(source),
     )
+
+
+def load_search_area(environ: Mapping[str, str] | None = None) -> SearchArea | None:
+    """Read the optional radius without requiring Discord secrets for live checks."""
+    source = os.environ if environ is None else environ
+    names = (
+        "FACEBOOK_SEARCH_LATITUDE",
+        "FACEBOOK_SEARCH_LONGITUDE",
+        "FACEBOOK_SEARCH_RADIUS_MILES",
+    )
+    raw_values = [source.get(name, "").strip() for name in names]
+    if not any(raw_values):
+        return None
+    if not all(raw_values):
+        raise ConfigurationError("Set all three search settings: " + ", ".join(names))
+    try:
+        return SearchArea(*(float(value) for value in raw_values))
+    except ValueError as error:
+        raise ConfigurationError(
+            "Invalid FACEBOOK_SEARCH_LATITUDE / FACEBOOK_SEARCH_LONGITUDE / "
+            "FACEBOOK_SEARCH_RADIUS_MILES: use valid coordinates and a positive "
+            "finite radius"
+        ) from error
 
 
 def _positive_integer(raw_value: str | None, setting_name: str) -> int:

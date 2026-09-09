@@ -1,6 +1,8 @@
 """Experimental anonymous Facebook Marketplace listing provider."""
 
+import json
 import logging
+import math
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -11,6 +13,7 @@ from urllib.parse import urlencode, urlparse
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
+from src.geo import SearchArea
 from src.models import Listing, Watch
 from src.providers.base import ListingProvider
 
@@ -128,6 +131,7 @@ class FacebookProvider(ListingProvider):
         max_results: int = 20,
         timeout_ms: int = 20_000,
         page_fetcher: PageFetcher | None = None,
+        search_area: SearchArea | None = None,
     ) -> None:
         normalized_location = location_slug.strip().lower()
         if (
@@ -146,6 +150,7 @@ class FacebookProvider(ListingProvider):
         self.location_slug = normalized_location
         self.max_results = max_results
         self.timeout_ms = timeout_ms
+        self.search_area = search_area
         self._page_fetcher = page_fetcher or _fetch_page_with_playwright
 
     async def search(self, watch: Watch) -> list[Listing]:
@@ -156,9 +161,11 @@ class FacebookProvider(ListingProvider):
 
         listings = parse_facebook_search_html(
             page.html,
-            max_results=self.max_results,
+            max_results=50 if self.search_area is not None else self.max_results,
         )
         if listings:
+            if self.search_area is not None:
+                return self._filter_by_distance(listings, page.html)[: self.max_results]
             return listings
         if _is_known_empty_result_page(page.html):
             return []
@@ -169,10 +176,124 @@ class FacebookProvider(ListingProvider):
 
     def build_search_url(self, query: str) -> str:
         """Build a location-scoped search URL without storing Facebook credentials."""
-        parameters = urlencode({"query": query.strip(), "exact": "false"})
+        parameters = {"query": query.strip(), "exact": "false"}
+        if self.search_area is not None:
+            # URL hints are best-effort; the local check enforces the actual radius.
+            parameters.update(
+                latitude=str(self.search_area.latitude),
+                longitude=str(self.search_area.longitude),
+                radius=str(math.ceil(self.search_area.radius_miles * 1.609344)),
+            )
         return (
-            f"{_FACEBOOK_ORIGIN}/marketplace/{self.location_slug}/search/?{parameters}"
+            f"{_FACEBOOK_ORIGIN}/marketplace/{self.location_slug}/search/"
+            f"?{urlencode(parameters)}"
         )
+
+    def _filter_by_distance(self, listings: list[Listing], html: str) -> list[Listing]:
+        """Exclude distant and unlocated cards before persistence or notification."""
+        assert self.search_area is not None
+        coordinates = _listing_coordinates(
+            html, {item.external_id for item in listings}
+        )
+        if not coordinates:
+            raise FacebookMarkupError(
+                "Cannot verify listing locations for the configured radius; "
+                "Facebook did not expose usable coordinates. No alerts were sent "
+                "for this watch. Run scripts.check_facebook_access locally."
+            )
+        nearby = []
+        unknown = 0
+        for listing in listings:
+            location = coordinates.get(listing.external_id)
+            if location is None:
+                unknown += 1
+                continue
+            if (
+                self.search_area.distance_miles(*location)
+                <= self.search_area.radius_miles
+            ):
+                nearby.append(listing)
+        logger.info(
+            "Facebook radius filter: %s nearby, %s outside radius, %s unknown location",
+            len(nearby),
+            len(listings) - len(nearby) - unknown,
+            unknown,
+        )
+        if unknown:
+            logger.warning(
+                "Skipped %s Facebook listings with unverified locations", unknown
+            )
+        return nearby
+
+
+class _LocationDataParser(HTMLParser):
+    """Read inert JSON page data; never execute scripts or infer from seller cities."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.documents: list[object] = []
+        self._parts: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "script" and dict(attrs).get("type") == "application/json":
+            self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._parts is not None:
+            self._parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script" and self._parts is not None:
+            with suppress(ValueError, RecursionError):
+                self.documents.append(json.loads("".join(self._parts)))
+            self._parts = None
+
+
+def _listing_coordinates(
+    html: str, wanted_ids: set[str]
+) -> dict[str, tuple[float, float]]:
+    """Join each visible card to its own JSON listing location by stable ID.
+
+    Coordinates are accepted only from the same object as the listing ID.
+    Missing, invalid, or conflicting locations remain unverified.
+    """
+    parser = _LocationDataParser()
+    parser.feed(html)
+    parser.close()
+    locations: dict[str, tuple[float, float]] = {}
+    conflicts: set[str] = set()
+    pending = list(parser.documents)
+    while pending:
+        value = pending.pop()
+        if isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, dict):
+            pending.extend(value.values())
+            listing_id = str(value.get("id", ""))
+            if listing_id not in wanted_ids or listing_id in conflicts:
+                continue
+            location = value.get("location")
+            if not isinstance(location, dict):
+                continue
+            latitude, longitude = location.get("latitude"), location.get("longitude")
+            if (
+                isinstance(latitude, bool)
+                or isinstance(longitude, bool)
+                or not isinstance(latitude, (int, float))
+                or not isinstance(longitude, (int, float))
+                or not math.isfinite(latitude)
+                or not math.isfinite(longitude)
+                or not -90 <= latitude <= 90
+                or not -180 <= longitude <= 180
+            ):
+                continue
+            coordinate = (float(latitude), float(longitude))
+            if listing_id in locations and locations[listing_id] != coordinate:
+                locations.pop(listing_id)
+                conflicts.add(listing_id)
+            else:
+                locations[listing_id] = coordinate
+    return locations
 
 
 async def _fetch_page_with_playwright(url: str, timeout_ms: int) -> RetrievedPage:

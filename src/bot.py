@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from src.database import Database
+from src.geo import SearchArea
 from src.notifier import DiscordNotifier
 from src.providers import FacebookProvider, MockProvider
 from src.scanner import Scanner, ScanResult
@@ -29,6 +30,7 @@ class MarketplaceBot(commands.Bot):
         scan_interval_minutes: int,
         scanner: Scanner | None = None,
         facebook_marketplace_location: str = "detroit",
+        facebook_search_area: SearchArea | None = None,
     ) -> None:
         intents = discord.Intents.default()
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
@@ -36,6 +38,8 @@ class MarketplaceBot(commands.Bot):
         self.marketplace_channel_id = marketplace_channel_id
         self.database = database
         self.scan_interval_minutes = scan_interval_minutes
+        self.facebook_marketplace_location = facebook_marketplace_location
+        self.facebook_search_area = facebook_search_area
         self.discord_notifier = DiscordNotifier(
             self,
             database,
@@ -45,7 +49,9 @@ class MarketplaceBot(commands.Bot):
             database=database,
             providers={
                 "mock": MockProvider(),
-                "facebook": FacebookProvider(facebook_marketplace_location),
+                "facebook": FacebookProvider(
+                    facebook_marketplace_location, search_area=facebook_search_area
+                ),
             },
             notifier=self.discord_notifier,
         )
@@ -103,6 +109,7 @@ def create_bot(
     scan_interval_minutes: int = 30,
     scanner: Scanner | None = None,
     facebook_marketplace_location: str = "detroit",
+    facebook_search_area: SearchArea | None = None,
 ) -> MarketplaceBot:
     """Create a bot instance and register the MVP commands."""
     bot = MarketplaceBot(
@@ -112,6 +119,7 @@ def create_bot(
         scan_interval_minutes,
         scanner,
         facebook_marketplace_location,
+        facebook_search_area,
     )
     watch_group = app_commands.Group(
         name="watch",
@@ -267,13 +275,19 @@ def create_bot(
         latency_ms = round(bot.latency * 1000)
         scanner_state = "running" if bot.scanner.is_running else "idle"
         last_scan = _format_last_scan(bot.scanner.last_finished_at)
+        search_area = (
+            bot.facebook_search_area.description
+            if bot.facebook_search_area is not None
+            else f"{bot.facebook_marketplace_location} (no distance limit)"
+        )
         await interaction.response.send_message(
             "Bot: online\n"
             f"Discord latency: {latency_ms} ms\n"
             "Database: connected\n"
             f"Scanner: {scanner_state}\n"
             f"Scan interval: {bot.scan_interval_minutes} minutes\n"
-            f"Last completed scan: {last_scan}",
+            f"Last completed scan: {last_scan}\n"
+            f"Facebook search: {search_area}",
             ephemeral=True,
         )
 
@@ -303,6 +317,7 @@ def run_bot(
     database_path: str | Path,
     scan_interval_minutes: int = 30,
     facebook_marketplace_location: str = "detroit",
+    facebook_search_area: SearchArea | None = None,
 ) -> None:
     """Connect the configured bot to Discord."""
     database = Database(database_path)
@@ -313,6 +328,7 @@ def run_bot(
             database,
             scan_interval_minutes,
             facebook_marketplace_location=facebook_marketplace_location,
+            facebook_search_area=facebook_search_area,
         )
         bot.run(token, log_handler=None)
     finally:

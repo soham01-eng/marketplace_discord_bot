@@ -28,6 +28,7 @@ def main() -> None:
         settings.database_path,
         settings.scan_interval_minutes,
         settings.facebook_marketplace_location,
+        settings.facebook_search_area,
     )
 
 

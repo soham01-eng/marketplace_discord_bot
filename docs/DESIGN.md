@@ -33,6 +33,7 @@ start automatically at Windows sign-in.
 - Notify the watch owner only when a stable listing ID has not been seen for
   that watch.
 - Keep manual and scheduled scanning behavior identical.
+- Optionally restrict Facebook alerts to a configured center and radius.
 - Remain useful for demos and tests without a live marketplace.
 - Fail clearly and continue scanning when an external provider is unavailable.
 
@@ -84,7 +85,8 @@ flowchart TD
 | `src/providers/` | Retrieve marketplace-specific data and return normalized `Listing` objects |
 | `src/filters.py` | Apply case-insensitive all-words title matching and price bounds |
 | `src/notifier.py` | Create, reuse, recreate, and archive watch threads; format listing embeds |
-| `src/config.py` | Validate required IDs, token presence, polling range, paths, and Facebook location slug |
+| `src/config.py` | Validate required IDs, token presence, polling range, paths, Facebook location slug, and optional radius settings |
+| `src/geo.py` | Validate a search area and calculate straight-line distances without network calls |
 
 The dependency direction is intentional: providers know how to translate
 external data into application models, while the scanner does not know how any
@@ -202,6 +204,41 @@ failure and continue.
 
 No Facebook credentials, cookies, or persistent browser profile are stored.
 
+### Optional search radius
+
+The September 2026 radius addition keeps geographic filtering inside the
+Facebook adapter. Three optional `.env` settings specify latitude, longitude,
+and radius in miles. They must be provided together; absent/blank settings
+preserve city-only searches. The example uses 42.377, -83.0796, the approximate
+center of ZIP 48202 from [Zippopotam.us](https://api.zippopotam.us/us/48202), and
+20 miles. There is no runtime geocoding dependency or database migration.
+
+The search URL includes best-effort coordinate and kilometer-radius hints, but
+correctness does not depend on Facebook honoring them. After normalizing up to
+50 visible cards from the same bounded page, the adapter joins card IDs to JSON
+objects with a matching `id` and direct `location.latitude` / `location.longitude`.
+It reads only inert `application/json` scripts and never executes their contents.
+Unrelated/seller coordinates, invalid values, and conflicting locations are not
+used. Haversine distance decides whether each verified card lies within the
+inclusive radius. Only then is the normal result limit applied.
+
+Unknown and out-of-range cards never reach the scanner's persistence or alert
+path. If every visible card lacks verifiable coordinates, the provider raises
+an explicit error; verified but entirely distant results legitimately return
+an empty list. Partial unknowns are skipped with a warning. This favors avoiding
+distant alerts at the cost of potentially missing nearby listings. Coordinates
+are approximate, and the radius measures straight-line rather than driving
+distance. This filters retrieved candidates; it cannot guarantee exhaustive
+coverage of every nearby listing.
+
+The settings apply to existing and future Facebook watches after a restart.
+`/status` displays the active area. The standalone check loads the same area
+settings without Discord secrets and accepts latitude/longitude/radius flags.
+Mock listings, the shared `Listing` model, and SQLite schema are unchanged.
+Synthetic fixtures cover the supported metadata shape; live anonymous coordinate
+availability requires a separate local check.
+
+
 ## 6. Matching and deduplication
 
 The provider performs retrieval; Python owns the final watch rules.
@@ -306,6 +343,8 @@ Runtime configuration is loaded from `.env`:
 | `SCAN_INTERVAL_MINUTES` | Integer from 15 through 45; default 30 |
 | `DATABASE_PATH` | Non-empty local path; default `data/marketplace.db` |
 | `FACEBOOK_MARKETPLACE_LOCATION` | Lowercase letters, numbers, and hyphens; default `detroit` |
+| `FACEBOOK_SEARCH_LATITUDE`, `FACEBOOK_SEARCH_LONGITUDE` | Optional valid coordinates, required together with radius |
+| `FACEBOOK_SEARCH_RADIUS_MILES` | Optional finite positive distance; absent triplet means no distance limit |
 
 The repository excludes `.env`, SQLite files, browser state, logs, and other
 generated output. The bot requires no privileged Discord intents.
@@ -331,7 +370,7 @@ and live Facebook access.
 |---|---|
 | Configuration | Required values, defaults, polling bounds, paths, and location validation |
 | Database | CRUD, ownership, persistence, migration, cascade deletion, timestamps, and deduplication |
-| Providers | Mock normalization and errors; Facebook URL building, saved-HTML parsing, limits, and access states |
+| Providers | Mock normalization and errors; Facebook URL building, saved-HTML parsing, limits, access states, radius boundaries, and unverified-coordinate handling |
 | Filtering | Case-insensitive query words, inclusive prices, and unknown prices |
 | Scanner | One-time notification, last-checked state, save-before-notify, and failure isolation |
 | Discord integration | Command behavior, ownership, thread lifecycle, embeds, rollback, and timestamp formatting |
@@ -379,6 +418,8 @@ anonymous access remains a separate manual check.
 ## 14. Known limitations
 
 - Facebook Marketplace access and markup are outside the project's control.
+- Radius mode skips unverified locations and fails clearly when no card location
+  can be verified; synthetic fixtures do not prove live metadata availability.
 - Polling is interval-based rather than real time.
 - The bot targets one configured Discord development server.
 - Watch threads are visible to members who can access the parent channel.
@@ -395,8 +436,8 @@ The existing boundaries support incremental improvements without changing the
 MVP's core architecture:
 
 1. Add edit, enable, and disable commands.
-2. Expose minimum price, include/exclude words, radius, location, and price-drop
-   options.
+2. Expose minimum price, include/exclude words, per-watch radius/location, and
+   price-drop options through Discord.
 3. Add notification delivery state and bounded retries.
 4. Surface recent provider failures and health details through `/status`.
 5. Implement another documented provider behind `ListingProvider`.
