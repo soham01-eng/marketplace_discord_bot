@@ -31,6 +31,8 @@ logs/
 .playwright-browsers/
 playwright-report/
 test-results/
+facebook-diagnostics/
+facebook-debug.html
 
 # Editors and operating systems
 .idea/

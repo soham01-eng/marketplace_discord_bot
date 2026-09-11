@@ -97,6 +97,7 @@ asynchronous lock.
 - Reuse archived threads, recreate missing threads, and archive threads when
   their watch is removed.
 - Show scanner state, interval, Discord latency, and the last completed scan.
+- Optionally enforce a straight-line Facebook radius before sending alerts.
 - Validate environment settings without exposing secret values.
 - Start automatically at Windows sign-in with retry and single-instance rules.
 
@@ -124,6 +125,9 @@ in watch-specific public threads under the configured marketplace channel.
 headless Chromium session. It extracts stable `/marketplace/item/<id>` links
 without relying on generated CSS class names and stores no Facebook credentials,
 cookies, or persistent browser profile.
+When a radius is configured, it also visits at most ten listing detail pages
+to verify locations missing from the search page. Each visit uses a temporary
+anonymous browser, so radius-enabled scans take longer than city-only scans.
 
 Login redirects, challenges, timeouts, or unrecognized markup produce clear
 provider errors. The scanner continues with other watches and never silently
@@ -223,6 +227,10 @@ DISCORD_MARKETPLACE_CHANNEL_ID=replace_with_your_marketplace_channel_id
 SCAN_INTERVAL_MINUTES=30
 DATABASE_PATH=data/marketplace.db
 FACEBOOK_MARKETPLACE_LOCATION=detroit
+# Approximate center of Detroit ZIP 48202; optional 20-mile distance limit.
+FACEBOOK_SEARCH_LATITUDE=42.377
+FACEBOOK_SEARCH_LONGITUDE=-83.0796
+FACEBOOK_SEARCH_RADIUS_MILES=20
 ```
 
 | Variable | Required | Default | Description |
@@ -233,9 +241,89 @@ FACEBOOK_MARKETPLACE_LOCATION=detroit
 | `SCAN_INTERVAL_MINUTES` | No | `30` | Scheduled interval, validated from 15 to 45 minutes |
 | `DATABASE_PATH` | No | `data/marketplace.db` | Local SQLite database path |
 | `FACEBOOK_MARKETPLACE_LOCATION` | No | `detroit` | Marketplace location slug, such as `ann-arbor` |
+| `FACEBOOK_SEARCH_LATITUDE` | With radius | — | Search center latitude, from -90 to 90 |
+| `FACEBOOK_SEARCH_LONGITUDE` | With radius | — | Search center longitude, from -180 to 180 |
+| `FACEBOOK_SEARCH_RADIUS_MILES` | With coordinates | — | Positive, finite straight-line distance in miles |
 
 `.env`, SQLite files, logs, browser data, and Playwright output are ignored by
 Git.
+
+### Change the search area and radius
+
+The example configuration uses a **20-mile radius around ZIP 48202**. The
+approximate ZIP center, **42.377, -83.0796**, comes from
+[Zippopotam.us](https://api.zippopotam.us/us/48202). No geocoding service is called
+by the bot. The city slug remains `detroit` to retrieve relevant candidates.
+
+For an existing installation, add the three `FACEBOOK_SEARCH_*` lines above to
+your local `.env`; pulling code does not replace that file. All three must be
+set together. Leave all three blank or absent to retain the original city-only
+behavior. Change only `FACEBOOK_SEARCH_RADIUS_MILES` to adjust the distance later.
+Restart the bot after edits. These settings apply to all Facebook watches,
+including existing ones; watches and their alert history do not need rebuilding.
+`/status` shows the active center and radius.
+
+The provider sends coordinates and a rounded-up kilometer radius as **best-effort
+URL hints**, then independently checks straight-line distance in Python. URL
+hints are not treated as proof that Facebook honored a search setting. The
+check reads listing coordinates from inert JSON, joining them to visible cards
+by listing ID. When coordinates are missing, it visits up to **ten individual
+listing pages per watch**, in search-result order. It stops these visits once
+enough nearby results are verified or an access error (including a timeout)
+occurs. It examines at most 50 search cards and returns at most the configured
+result limit after filtering (20 by default). Cards beyond the detail-visit
+budget remain unverified and are skipped.
+
+Cards outside the radius or without verifiable coordinates are excluded before
+being saved as seen or sent to Discord. If no visible cards have usable
+coordinates, the watch scan fails clearly instead of claiming there were no
+nearby matches. Unknown or conflicting coordinates are never guessed from a
+city name. This can omit nearby listings when Facebook withholds location data.
+Both the ZIP center and Facebook listing coordinates are approximate; **20 miles
+is not a driving-distance or travel-time limit**.
+
+Before restarting automatic scanning, check the new settings locally:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.check_facebook_access --query "office chair"
+```
+
+The command loads `.env`, prints the configured area and filtering counts, and
+returns a nonzero exit code on access or location-verification errors. It does
+not send Discord alerts or change the database. You can also override the area:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.check_facebook_access --query "office chair" --latitude 42.377 --longitude -83.0796 --radius-miles 20
+```
+
+**Validation status:** the September 2026 anonymous search capture contained
+14 visible listings with city/state labels but no listing coordinates. A local
+detail-page diagnostic then found consistent coordinates for two sampled
+listings and conflicting coordinates for a third. The provider now uses those
+observed detail-page fields; conflicting locations stay excluded. Regression
+tests reconstruct the geographic objects from that report with synthetic IDs.
+The updated retrieval flow still needs a live check on the machine running
+the bot. A passing unit test does not guarantee ongoing Facebook availability.
+
+To investigate a location-verification failure, run the opt-in diagnostic check:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.check_facebook_access --query "office chair" --diagnostics-dir facebook-diagnostics
+```
+
+This saves the search HTML, inspects up to three visible listing pages, and
+writes `facebook-diagnostics/location-report.json` plus the captured detail HTML.
+It reuses pages already fetched during this check; only uncaptured samples need
+additional anonymous visits. Start by inspecting or sharing the small JSON report;
+it includes listing IDs and geographic fields, without environment values,
+cookies, or unrelated session metadata. Raw HTML remains available locally
+for further debugging. The default diagnostic directory is ignored by Git;
+keep captures out of commits if you choose another directory.
+
+The check still exits unsuccessfully if radius verification fails after detail
+lookups, even when the report saves successfully. The standalone check and
+diagnostics do not send alerts or update the database. Tests include a reduced,
+sanitized fixture with the observed city-only JSON structure.
 
 ## Run the bot
 
@@ -352,8 +440,8 @@ details.
 ## Future improvements
 
 - Add edit, enable, and disable commands for existing watches.
-- Expose minimum price, include/exclude words, radius, location, and price-drop
-  controls.
+- Expose minimum price, include/exclude words, per-watch radius/location, and
+  price-drop controls through Discord.
 - Add notification retry state without reintroducing duplicate alerts.
 - Add provider health and recent failure summaries to `/status`.
 - Support another documented provider through the existing interface.

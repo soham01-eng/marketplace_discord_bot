@@ -33,6 +33,7 @@ start automatically at Windows sign-in.
 - Notify the watch owner only when a stable listing ID has not been seen for
   that watch.
 - Keep manual and scheduled scanning behavior identical.
+- Optionally restrict Facebook alerts to a configured center and radius.
 - Remain useful for demos and tests without a live marketplace.
 - Fail clearly and continue scanning when an external provider is unavailable.
 
@@ -84,7 +85,8 @@ flowchart TD
 | `src/providers/` | Retrieve marketplace-specific data and return normalized `Listing` objects |
 | `src/filters.py` | Apply case-insensitive all-words title matching and price bounds |
 | `src/notifier.py` | Create, reuse, recreate, and archive watch threads; format listing embeds |
-| `src/config.py` | Validate required IDs, token presence, polling range, paths, and Facebook location slug |
+| `src/config.py` | Validate required IDs, token presence, polling range, paths, Facebook location slug, and optional radius settings |
+| `src/geo.py` | Validate a search area and calculate straight-line distances without network calls |
 
 The dependency direction is intentional: providers know how to translate
 external data into application models, while the scanner does not know how any
@@ -188,6 +190,7 @@ open one bounded, location-scoped Marketplace search page. It:
 
 - URL-encodes the watch query;
 - waits for stable `/marketplace/item/<id>` links;
+- with a radius, checks up to ten individual listing pages for missing locations;
 - parses standard HTML without generated CSS class names;
 - extracts the stable listing ID, title, optional price and image, and a
   canonical item URL;
@@ -201,6 +204,69 @@ access failures use explicit provider error types so the scanner can log the
 failure and continue.
 
 No Facebook credentials, cookies, or persistent browser profile are stored.
+
+### Optional search radius
+
+The September 2026 radius addition keeps geographic filtering inside the
+Facebook adapter. Three optional `.env` settings specify latitude, longitude,
+and radius in miles. They must be provided together; absent/blank settings
+preserve city-only searches. The example uses 42.377, -83.0796, the approximate
+center of ZIP 48202 from [Zippopotam.us](https://api.zippopotam.us/us/48202), and
+20 miles. There is no runtime geocoding dependency or database migration.
+
+The search URL includes best-effort coordinate and kilometer-radius hints, but
+correctness does not depend on Facebook honoring them. After normalizing up to
+50 visible cards from the same bounded page, the adapter joins card IDs to JSON
+objects with a matching `id` and direct `location.latitude` / `location.longitude`.
+If search data lacks a listing's coordinates, it visits that listing's canonical
+detail URL and applies the same ID-specific parser. There are at most ten such
+visits per watch, in result order. Known search coordinates need no detail visit;
+conflicting search coordinates cannot be overridden. The final detail URL must
+still identify the requested Facebook item. Seller and recommended-item metadata
+cannot substitute for that item's own location.
+
+Detail visits stop when the result limit is satisfied, the ten-page budget is
+used, or an access error (including a timeout) occurs. Already verified results
+are retained. Other retrieval/markup errors leave the item unverified. Each
+visit uses the existing temporary anonymous browser and 20-second navigation
+timeout; there are no background retries, persistent sessions, or new services.
+This adds latency and may omit nearby cards beyond the detail budget.
+
+It reads only inert `application/json` scripts and never executes their contents.
+Unrelated/seller coordinates, invalid values, and conflicting locations are not
+used. Haversine distance decides whether each verified card lies within the
+inclusive radius. Only then is the normal result limit applied.
+
+Unknown and out-of-range cards never reach the scanner's persistence or alert
+path. If every visible card lacks verifiable coordinates, the provider raises
+an explicit error; verified but entirely distant results legitimately return
+an empty list. Partial unknowns are skipped with a warning. This favors avoiding
+distant alerts at the cost of potentially missing nearby listings. Coordinates
+are approximate, and the radius measures straight-line rather than driving
+distance. This filters retrieved candidates; it cannot guarantee exhaustive
+coverage of every nearby listing.
+
+The settings apply to existing and future Facebook watches after a restart.
+`/status` displays the active area. The standalone check loads the same area
+settings without Discord secrets and accepts latitude/longitude/radius flags.
+Mock listings, the shared `Listing` model, and SQLite schema are unchanged.
+Synthetic fixtures cover the supported coordinate shape. A September 2026
+anonymous capture exposed only city/state data for all 14 visible listings,
+and included distant cities despite the URL hint. A subsequent local diagnostic
+found consistent listing coordinates on two detail pages and conflicting pairs
+on a third. This evidence supports bounded detail lookups. Tests reconstruct
+these geographic objects with synthetic IDs and exercise the provider through
+the scanner/notification boundary. The updated retrieval flow still needs a
+live local check. Search-center coordinates must never become listing coordinates.
+
+The manual check's opt-in `--diagnostics-dir facebook-diagnostics` flag saves
+the search HTML and inspects at most three anonymous listing detail pages,
+reusing captures from the current check when available.
+It records per-page access failures and writes a small geographic report plus
+local HTML captures. It preserves a failed radius check's exit status and does
+not send alerts or change database state. The original search capture is retained
+even after the provider visits detail pages.
+
 
 ## 6. Matching and deduplication
 
@@ -306,6 +372,8 @@ Runtime configuration is loaded from `.env`:
 | `SCAN_INTERVAL_MINUTES` | Integer from 15 through 45; default 30 |
 | `DATABASE_PATH` | Non-empty local path; default `data/marketplace.db` |
 | `FACEBOOK_MARKETPLACE_LOCATION` | Lowercase letters, numbers, and hyphens; default `detroit` |
+| `FACEBOOK_SEARCH_LATITUDE`, `FACEBOOK_SEARCH_LONGITUDE` | Optional valid coordinates, required together with radius |
+| `FACEBOOK_SEARCH_RADIUS_MILES` | Optional finite positive distance; absent triplet means no distance limit |
 
 The repository excludes `.env`, SQLite files, browser state, logs, and other
 generated output. The bot requires no privileged Discord intents.
@@ -331,7 +399,7 @@ and live Facebook access.
 |---|---|
 | Configuration | Required values, defaults, polling bounds, paths, and location validation |
 | Database | CRUD, ownership, persistence, migration, cascade deletion, timestamps, and deduplication |
-| Providers | Mock normalization and errors; Facebook URL building, saved-HTML parsing, limits, and access states |
+| Providers | Mock normalization and errors; Facebook URL building, saved-HTML parsing, limits, access states, radius boundaries, and unverified-coordinate handling |
 | Filtering | Case-insensitive query words, inclusive prices, and unknown prices |
 | Scanner | One-time notification, last-checked state, save-before-notify, and failure isolation |
 | Discord integration | Command behavior, ownership, thread lifecycle, embeds, rollback, and timestamp formatting |
@@ -371,14 +439,16 @@ anonymous access remains a separate manual check.
 - Configuration errors never include the Discord token value.
 - Discord commands enforce watch ownership for listing and deletion.
 - Facebook access is anonymous and uses a temporary browser context.
-- The provider visits one bounded search page and does not crawl seller
-  profiles or infinite result pages.
+- The provider visits one search page and up to ten item pages when verifying
+  a radius. It does not crawl seller profiles or infinite result pages.
 - The project does not solve CAPTCHAs, rotate proxies, spoof browser
   fingerprints, persist authenticated sessions, or circumvent checkpoints.
 
 ## 14. Known limitations
 
 - Facebook Marketplace access and markup are outside the project's control.
+- Radius mode skips unverified locations and fails clearly when no card location
+  can be verified; synthetic fixtures do not prove live metadata availability.
 - Polling is interval-based rather than real time.
 - The bot targets one configured Discord development server.
 - Watch threads are visible to members who can access the parent channel.
@@ -395,8 +465,8 @@ The existing boundaries support incremental improvements without changing the
 MVP's core architecture:
 
 1. Add edit, enable, and disable commands.
-2. Expose minimum price, include/exclude words, radius, location, and price-drop
-   options.
+2. Expose minimum price, include/exclude words, per-watch radius/location, and
+   price-drop options through Discord.
 3. Add notification delivery state and bounded retries.
 4. Surface recent provider failures and health details through `/status`.
 5. Implement another documented provider behind `ListingProvider`.
