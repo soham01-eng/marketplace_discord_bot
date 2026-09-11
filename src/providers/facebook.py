@@ -20,6 +20,7 @@ from src.providers.base import ListingProvider
 logger = logging.getLogger(__name__)
 
 _FACEBOOK_ORIGIN = "https://www.facebook.com"
+_MAX_DETAIL_PAGES = 10
 _ITEM_HREF_PATTERN = re.compile(r"/marketplace/item/(?P<listing_id>\d+)(?:[/?#]|$)")
 _PRICE_PATTERN = re.compile(r"(?:US\$|\$)\s*(?P<amount>\d[\d,]*(?:\.\d{1,2})?)")
 _LOCATION_PATTERN = re.compile(r"[A-Za-z0-9-]+")
@@ -120,7 +121,7 @@ class _ListingAnchorParser(HTMLParser):
 
 
 class FacebookProvider(ListingProvider):
-    """Retrieve a small anonymous Marketplace result page with Playwright."""
+    """Retrieve anonymous search results and bounded listing location details."""
 
     source = "facebook"
 
@@ -154,7 +155,7 @@ class FacebookProvider(ListingProvider):
         self._page_fetcher = page_fetcher or _fetch_page_with_playwright
 
     async def search(self, watch: Watch) -> list[Listing]:
-        """Return normalized listings from one bounded Marketplace search page."""
+        """Return normalized listings, verifying missing locations when needed."""
         search_url = self.build_search_url(watch.query)
         page = await self._page_fetcher(search_url, self.timeout_ms)
         _raise_for_access_problem(page)
@@ -165,7 +166,9 @@ class FacebookProvider(ListingProvider):
         )
         if listings:
             if self.search_area is not None:
-                return self._filter_by_distance(listings, page.html)[: self.max_results]
+                return (await self._filter_by_distance(listings, page.html))[
+                    : self.max_results
+                ]
             return listings
         if _is_known_empty_result_page(page.html):
             return []
@@ -189,16 +192,71 @@ class FacebookProvider(ListingProvider):
             f"?{urlencode(parameters)}"
         )
 
-    def _filter_by_distance(self, listings: list[Listing], html: str) -> list[Listing]:
+    async def _filter_by_distance(
+        self, listings: list[Listing], html: str
+    ) -> list[Listing]:
         """Exclude distant and unlocated cards before persistence or notification."""
         assert self.search_area is not None
-        coordinates = _listing_coordinates(
+        coordinates, conflicts = _listing_coordinate_data(
             html, {item.external_id for item in listings}
+        )
+        nearby_count = sum(
+            self.search_area.distance_miles(*location) <= self.search_area.radius_miles
+            for location in coordinates.values()
+        )
+        detail_requests = 0
+        for listing in listings:
+            if nearby_count >= self.max_results or detail_requests >= _MAX_DETAIL_PAGES:
+                break
+            if listing.external_id in coordinates or listing.external_id in conflicts:
+                continue
+            detail_requests += 1
+            logger.info(
+                "Checking Facebook listing location %s/%s: %s",
+                detail_requests,
+                _MAX_DETAIL_PAGES,
+                listing.external_id,
+            )
+            try:
+                page = await self._page_fetcher(listing.url, self.timeout_ms)
+                _raise_for_access_problem(page)
+                final_url = urlparse(page.url)
+                final_item = _ITEM_HREF_PATTERN.search(final_url.path)
+                if (
+                    final_url.hostname not in {"facebook.com", "www.facebook.com"}
+                    or final_item is None
+                    or final_item.group("listing_id") != listing.external_id
+                ):
+                    raise FacebookMarkupError(
+                        "Facebook did not return the requested listing detail page"
+                    )
+                location = _listing_coordinates(page.html, {listing.external_id}).get(
+                    listing.external_id
+                )
+            except FacebookProviderError as error:
+                logger.warning(
+                    "Could not verify Facebook listing %s: %s",
+                    listing.external_id,
+                    error,
+                )
+                if isinstance(error, FacebookAccessError):
+                    # Do not keep visiting pages after login, a challenge, or timeout.
+                    break
+                continue
+            if location is not None:
+                coordinates[listing.external_id] = location
+                nearby_count += (
+                    self.search_area.distance_miles(*location)
+                    <= self.search_area.radius_miles
+                )
+        logger.info(
+            "Facebook location verification: %s detail pages checked", detail_requests
         )
         if not coordinates:
             raise FacebookMarkupError(
                 "Cannot verify listing locations for the configured radius; "
-                "no usable listing coordinates were found in the search-page JSON. "
+                "no usable listing coordinates were found in the search page or "
+                "the bounded detail-page checks. "
                 "City names and search-center coordinates cannot verify a listing's "
                 "distance. No alerts were sent for this watch. Diagnose with "
                 'python -m scripts.check_facebook_access --query "office chair" '
@@ -260,6 +318,13 @@ def _listing_coordinates(
     Coordinates are accepted only from the same object as the listing ID.
     Missing, invalid, or conflicting locations remain unverified.
     """
+    return _listing_coordinate_data(html, wanted_ids)[0]
+
+
+def _listing_coordinate_data(
+    html: str, wanted_ids: set[str]
+) -> tuple[dict[str, tuple[float, float]], set[str]]:
+    """Keep conflicting IDs distinct from missing locations during detail lookup."""
     parser = _LocationDataParser()
     parser.feed(html)
     parser.close()
@@ -296,7 +361,7 @@ def _listing_coordinates(
                 conflicts.add(listing_id)
             else:
                 locations[listing_id] = coordinate
-    return locations
+    return locations, conflicts
 
 
 async def _fetch_page_with_playwright(url: str, timeout_ms: int) -> RetrievedPage:

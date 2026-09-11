@@ -48,11 +48,24 @@ async def _search(arguments: argparse.Namespace) -> int:
             environment[setting] = str(value)
     search_area = load_search_area(environment)
     captured_page: RetrievedPage | None = None
+    captured_pages: dict[str, RetrievedPage] = {}
+    retrieval_errors: dict[str, FacebookProviderError] = {}
 
     async def capture_page(url: str, timeout_ms: int) -> RetrievedPage:
         nonlocal captured_page
-        captured_page = await _fetch_page_with_playwright(url, timeout_ms)
-        return captured_page
+        if url in captured_pages:
+            return captured_pages[url]
+        if url in retrieval_errors:
+            raise retrieval_errors[url]
+        try:
+            page = await _fetch_page_with_playwright(url, timeout_ms)
+        except FacebookProviderError as error:
+            retrieval_errors[url] = error
+            raise
+        captured_pages[url] = page
+        if captured_page is None:
+            captured_page = page
+        return page
 
     watch = Watch(
         id=0,
@@ -89,7 +102,7 @@ async def _search(arguments: argparse.Namespace) -> int:
             report_path = await save_location_diagnostics(
                 captured_page,
                 arguments.diagnostics_dir,
-                _fetch_page_with_playwright,
+                capture_page,
                 provider.timeout_ms,
             )
             print(f"Saved diagnostics: {report_path}")

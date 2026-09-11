@@ -125,6 +125,9 @@ in watch-specific public threads under the configured marketplace channel.
 headless Chromium session. It extracts stable `/marketplace/item/<id>` links
 without relying on generated CSS class names and stores no Facebook credentials,
 cookies, or persistent browser profile.
+When a radius is configured, it also visits at most ten listing detail pages
+to verify locations missing from the search page. Each visit uses a temporary
+anonymous browser, so radius-enabled scans take longer than city-only scans.
 
 Login redirects, challenges, timeouts, or unrecognized markup produce clear
 provider errors. The scanner continues with other watches and never silently
@@ -263,10 +266,13 @@ including existing ones; watches and their alert history do not need rebuilding.
 The provider sends coordinates and a rounded-up kilometer radius as **best-effort
 URL hints**, then independently checks straight-line distance in Python. URL
 hints are not treated as proof that Facebook honored a search setting. The
-check reads listing coordinates from inert JSON in the same public search page,
-joining them to visible cards by listing ID; it does not visit each listing or
-look up seller profiles. It examines at most 50 cards and returns at most the
-configured result limit after filtering (20 by default).
+check reads listing coordinates from inert JSON, joining them to visible cards
+by listing ID. When coordinates are missing, it visits up to **ten individual
+listing pages per watch**, in search-result order. It stops these visits once
+enough nearby results are verified or an access error (including a timeout)
+occurs. It examines at most 50 search cards and returns at most the configured
+result limit after filtering (20 by default). Cards beyond the detail-visit
+budget remain unverified and are skipped.
 
 Cards outside the radius or without verifiable coordinates are excluded before
 being saved as seen or sent to Discord. If no visible cards have usable
@@ -290,12 +296,14 @@ not send Discord alerts or change the database. You can also override the area:
 .\.venv\Scripts\python.exe -m scripts.check_facebook_access --query "office chair" --latitude 42.377 --longitude -83.0796 --radius-miles 20
 ```
 
-**Current radius limitation:** an anonymous search-page capture inspected in
-September 2026 contained 14 visible listings with city/state labels but no
-listing coordinates. It also included distant cities despite the radius URL
-hint. The strict filter correctly rejects that page; the radius feature is
-not yet verified for live use. A passing unit test does not establish that
-Facebook exposes the required data.
+**Validation status:** the September 2026 anonymous search capture contained
+14 visible listings with city/state labels but no listing coordinates. A local
+detail-page diagnostic then found consistent coordinates for two sampled
+listings and conflicting coordinates for a third. The provider now uses those
+observed detail-page fields; conflicting locations stay excluded. Regression
+tests reconstruct the geographic objects from that report with synthetic IDs.
+The updated retrieval flow still needs a live check on the machine running
+the bot. A passing unit test does not guarantee ongoing Facebook availability.
 
 To investigate a location-verification failure, run the opt-in diagnostic check:
 
@@ -303,19 +311,19 @@ To investigate a location-verification failure, run the opt-in diagnostic check:
 .\.venv\Scripts\python.exe -m scripts.check_facebook_access --query "office chair" --diagnostics-dir facebook-diagnostics
 ```
 
-This saves the search HTML, visits at most three visible listing pages
-anonymously, and writes `facebook-diagnostics/location-report.json` plus the
-captured detail HTML. Start by inspecting or sharing the small JSON report;
+This saves the search HTML, inspects up to three visible listing pages, and
+writes `facebook-diagnostics/location-report.json` plus the captured detail HTML.
+It reuses pages already fetched during this check; only uncaptured samples need
+additional anonymous visits. Start by inspecting or sharing the small JSON report;
 it includes listing IDs and geographic fields, without environment values,
 cookies, or unrelated session metadata. Raw HTML remains available locally
 for further debugging. The default diagnostic directory is ignored by Git;
 keep captures out of commits if you choose another directory.
 
-The check still exits unsuccessfully if the search-page radius verification
-fails, even when the report saves successfully. Detail-page diagnostics do not
-send alerts, update the database, or change the production provider's one-page
-retrieval behavior. Tests include a reduced, sanitized fixture with the
-observed city-only JSON structure.
+The check still exits unsuccessfully if radius verification fails after detail
+lookups, even when the report saves successfully. The standalone check and
+diagnostics do not send alerts or update the database. Tests include a reduced,
+sanitized fixture with the observed city-only JSON structure.
 
 ## Run the bot
 

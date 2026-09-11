@@ -104,5 +104,10 @@ async def test_checker_saves_opt_in_diagnostics_without_hiding_radius_failure(
         diagnostics_dir=tmp_path if diagnostics else None,
     )
     assert await check_facebook_access._search(arguments) == 1
-    assert len(calls) == (4 if diagnostics else 1)
+    # The radius filter makes up to ten detail visits. Diagnostics reuse those
+    # captures without fetching them again and retain the original search.
+    assert len(calls) == 11
     assert (tmp_path / "location-report.json").exists() == diagnostics
+    if diagnostics:
+        report = json.loads((tmp_path / "location-report.json").read_text())
+        assert report["search"]["visible_listings"] == 14

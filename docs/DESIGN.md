@@ -190,6 +190,7 @@ open one bounded, location-scoped Marketplace search page. It:
 
 - URL-encodes the watch query;
 - waits for stable `/marketplace/item/<id>` links;
+- with a radius, checks up to ten individual listing pages for missing locations;
 - parses standard HTML without generated CSS class names;
 - extracts the stable listing ID, title, optional price and image, and a
   canonical item URL;
@@ -217,6 +218,20 @@ The search URL includes best-effort coordinate and kilometer-radius hints, but
 correctness does not depend on Facebook honoring them. After normalizing up to
 50 visible cards from the same bounded page, the adapter joins card IDs to JSON
 objects with a matching `id` and direct `location.latitude` / `location.longitude`.
+If search data lacks a listing's coordinates, it visits that listing's canonical
+detail URL and applies the same ID-specific parser. There are at most ten such
+visits per watch, in result order. Known search coordinates need no detail visit;
+conflicting search coordinates cannot be overridden. The final detail URL must
+still identify the requested Facebook item. Seller and recommended-item metadata
+cannot substitute for that item's own location.
+
+Detail visits stop when the result limit is satisfied, the ten-page budget is
+used, or an access error (including a timeout) occurs. Already verified results
+are retained. Other retrieval/markup errors leave the item unverified. Each
+visit uses the existing temporary anonymous browser and 20-second navigation
+timeout; there are no background retries, persistent sessions, or new services.
+This adds latency and may omit nearby cards beyond the detail budget.
+
 It reads only inert `application/json` scripts and never executes their contents.
 Unrelated/seller coordinates, invalid values, and conflicting locations are not
 used. Haversine distance decides whether each verified card lies within the
@@ -237,18 +252,20 @@ settings without Discord secrets and accepts latitude/longitude/radius flags.
 Mock listings, the shared `Listing` model, and SQLite schema are unchanged.
 Synthetic fixtures cover the supported coordinate shape. A September 2026
 anonymous capture exposed only city/state data for all 14 visible listings,
-and included distant cities despite the URL hint. The strict radius remains
-unverified for live use; this observed city-only shape now has a reduced,
-sanitized regression fixture. Search-center coordinates must never be used as
-listing coordinates.
+and included distant cities despite the URL hint. A subsequent local diagnostic
+found consistent listing coordinates on two detail pages and conflicting pairs
+on a third. This evidence supports bounded detail lookups. Tests reconstruct
+these geographic objects with synthetic IDs and exercise the provider through
+the scanner/notification boundary. The updated retrieval flow still needs a
+live local check. Search-center coordinates must never become listing coordinates.
 
 The manual check's opt-in `--diagnostics-dir facebook-diagnostics` flag saves
-the search HTML and inspects at most three anonymous listing detail pages.
+the search HTML and inspects at most three anonymous listing detail pages,
+reusing captures from the current check when available.
 It records per-page access failures and writes a small geographic report plus
 local HTML captures. It preserves a failed radius check's exit status and does
-not send alerts or change database state. Automatic scans still use one search
-page; detail-page retrieval is diagnostic only until location availability can
-be established from the machine running the bot.
+not send alerts or change database state. The original search capture is retained
+even after the provider visits detail pages.
 
 
 ## 6. Matching and deduplication
@@ -422,8 +439,8 @@ anonymous access remains a separate manual check.
 - Configuration errors never include the Discord token value.
 - Discord commands enforce watch ownership for listing and deletion.
 - Facebook access is anonymous and uses a temporary browser context.
-- The provider visits one bounded search page and does not crawl seller
-  profiles or infinite result pages.
+- The provider visits one search page and up to ten item pages when verifying
+  a radius. It does not crawl seller profiles or infinite result pages.
 - The project does not solve CAPTCHAs, rotate proxies, spoof browser
   fingerprints, persist authenticated sessions, or circumvent checkpoints.
 
