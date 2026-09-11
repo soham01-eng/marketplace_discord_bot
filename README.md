@@ -290,9 +290,32 @@ not send Discord alerts or change the database. You can also override the area:
 .\.venv\Scripts\python.exe -m scripts.check_facebook_access --query "office chair" --latitude 42.377 --longitude -83.0796 --radius-miles 20
 ```
 
-The radius parser has deterministic synthetic-fixture coverage. Live anonymous
-location-data availability still needs to be checked from the machine running
-the bot; a passing unit test does not establish that Facebook exposes it.
+**Current radius limitation:** an anonymous search-page capture inspected in
+September 2026 contained 14 visible listings with city/state labels but no
+listing coordinates. It also included distant cities despite the radius URL
+hint. The strict filter correctly rejects that page; the radius feature is
+not yet verified for live use. A passing unit test does not establish that
+Facebook exposes the required data.
+
+To investigate a location-verification failure, run the opt-in diagnostic check:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.check_facebook_access --query "office chair" --diagnostics-dir facebook-diagnostics
+```
+
+This saves the search HTML, visits at most three visible listing pages
+anonymously, and writes `facebook-diagnostics/location-report.json` plus the
+captured detail HTML. Start by inspecting or sharing the small JSON report;
+it includes listing IDs and geographic fields, without environment values,
+cookies, or unrelated session metadata. Raw HTML remains available locally
+for further debugging. The default diagnostic directory is ignored by Git;
+keep captures out of commits if you choose another directory.
+
+The check still exits unsuccessfully if the search-page radius verification
+fails, even when the report saves successfully. Detail-page diagnostics do not
+send alerts, update the database, or change the production provider's one-page
+retrieval behavior. Tests include a reduced, sanitized fixture with the
+observed city-only JSON structure.
 
 ## Run the bot
 

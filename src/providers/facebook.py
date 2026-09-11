@@ -198,8 +198,11 @@ class FacebookProvider(ListingProvider):
         if not coordinates:
             raise FacebookMarkupError(
                 "Cannot verify listing locations for the configured radius; "
-                "Facebook did not expose usable coordinates. No alerts were sent "
-                "for this watch. Run scripts.check_facebook_access locally."
+                "no usable listing coordinates were found in the search-page JSON. "
+                "City names and search-center coordinates cannot verify a listing's "
+                "distance. No alerts were sent for this watch. Diagnose with "
+                'python -m scripts.check_facebook_access --query "office chair" '
+                "--diagnostics-dir facebook-diagnostics."
             )
         nearby = []
         unknown = 0

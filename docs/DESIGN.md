@@ -235,8 +235,20 @@ The settings apply to existing and future Facebook watches after a restart.
 `/status` displays the active area. The standalone check loads the same area
 settings without Discord secrets and accepts latitude/longitude/radius flags.
 Mock listings, the shared `Listing` model, and SQLite schema are unchanged.
-Synthetic fixtures cover the supported metadata shape; live anonymous coordinate
-availability requires a separate local check.
+Synthetic fixtures cover the supported coordinate shape. A September 2026
+anonymous capture exposed only city/state data for all 14 visible listings,
+and included distant cities despite the URL hint. The strict radius remains
+unverified for live use; this observed city-only shape now has a reduced,
+sanitized regression fixture. Search-center coordinates must never be used as
+listing coordinates.
+
+The manual check's opt-in `--diagnostics-dir facebook-diagnostics` flag saves
+the search HTML and inspects at most three anonymous listing detail pages.
+It records per-page access failures and writes a small geographic report plus
+local HTML captures. It preserves a failed radius check's exit status and does
+not send alerts or change database state. Automatic scans still use one search
+page; detail-page retrieval is diagnostic only until location availability can
+be established from the machine running the bot.
 
 
 ## 6. Matching and deduplication
