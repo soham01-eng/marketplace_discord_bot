@@ -220,8 +220,8 @@ correctness does not depend on Facebook honoring them. After normalizing up to
 objects with a matching `id` and direct `location.latitude` / `location.longitude`.
 If search data lacks a listing's coordinates, it visits that listing's canonical
 detail URL and applies the same ID-specific parser. There are at most ten such
-visits per watch, in result order. Known search coordinates need no detail visit;
-conflicting search coordinates cannot be overridden. The final detail URL must
+visits per watch per scan, in result order. Known search coordinates need no
+detail visit; conflicting search coordinates cannot be overridden. The final detail URL must
 still identify the requested Facebook item. Seller and recommended-item metadata
 cannot substitute for that item's own location.
 
@@ -231,6 +231,26 @@ are retained. Other retrieval/markup errors leave the item unverified. Each
 visit uses the existing temporary anonymous browser and 20-second navigation
 timeout; there are no background retries, persistent sessions, or new services.
 This adds latency and may omit nearby cards beyond the detail budget.
+
+The limits apply to each invocation of `FacebookProvider.search(watch)`, shared
+by manual and scheduled scans (30 minutes by default). The provider considers
+up to 50 cards from a single loaded search page without pagination, makes up to
+ten missing-location detail requests, and returns at most `max_results` nearby
+listings. The running bot uses the provider default of 20 results; the standalone
+check defaults to five. Its `--max-results` flag does not change the ten-request
+cap. Cards with usable search-page coordinates need no detail request and can
+allow more than ten results to be returned.
+
+**Coverage does not progress across scans.** Each call starts with the current
+Facebook result order. There is no per-watch cursor, rotation through later
+batches, or coordinate cache across scans. The provider does not consult the
+database's seen IDs, and the scanner applies title/price rules and deduplication
+only after retrieval and radius filtering. Consequently, previously alerted
+listings, distant items, and items that later fail matching can repeatedly use
+the detail budget. With an unchanged result order, a nearby match beyond the
+budget may remain unchecked indefinitely. The same listing can also incur a
+detail request for each watch that retrieves it. Deduplication prevents repeat
+notifications, not repeat location requests.
 
 It reads only inert `application/json` scripts and never executes their contents.
 Unrelated/seller coordinates, invalid values, and conflicting locations are not
@@ -254,10 +274,21 @@ Synthetic fixtures cover the supported coordinate shape. A September 2026
 anonymous capture exposed only city/state data for all 14 visible listings,
 and included distant cities despite the URL hint. A subsequent local diagnostic
 found consistent listing coordinates on two detail pages and conflicting pairs
-on a third. This evidence supports bounded detail lookups. Tests reconstruct
-these geographic objects with synthetic IDs and exercise the provider through
-the scanner/notification boundary. The updated retrieval flow still needs a
-live local check. Search-center coordinates must never become listing coordinates.
+on a third. Tests reconstruct these geographic objects with synthetic IDs and
+exercise the provider through the scanner/notification boundary. Search-center
+coordinates must never become listing coordinates.
+
+The owner subsequently confirmed a successful live Windows run using the
+updated provider and the 48202/20-mile settings. From 14 visible cards, it made
+seven detail requests and returned five nearby listings, rejected one outside
+the radius, and counted eight unknown locations. Seven unknowns were unvisited
+after the default five-result limit was reached; one visited item remained
+unverified. Thus, the unknown count includes unchecked cards as well as missing,
+invalid, or conflicting location data. These are provider result counts, not
+watch matches or sent alerts. The owner then confirmed the scheduled bot was
+running. The update also passed 101 automated tests and GitHub CI. This validates
+one live run while leaving the documented coverage and availability limits
+in place.
 
 The manual check's opt-in `--diagnostics-dir facebook-diagnostics` flag saves
 the search HTML and inspects at most three anonymous listing detail pages,
@@ -431,6 +462,7 @@ anonymous access remains a separate manual check.
 | Save before notify | Strong idempotency across repeated scans and restarts | Failed delivery is not retried in the MVP |
 | Saved Facebook HTML in tests | Fast, stable parser validation | Does not detect live markup changes by itself |
 | Anonymous, bounded Facebook access | Avoids storing credentials and limits retrieval scope | Access can fail or change without notice |
+| Ten detail lookups per watch per scan | Limits browser requests for radius checks | Seen or unsuitable items can repeatedly consume the budget; later matches may remain unchecked |
 | Local-first deployment | Meets the $0 goal and keeps secrets local | Availability depends on the owner's PC |
 
 ## 13. Security and responsible-use boundaries
@@ -449,6 +481,9 @@ anonymous access remains a separate manual check.
 - Facebook Marketplace access and markup are outside the project's control.
 - Radius mode skips unverified locations and fails clearly when no card location
   can be verified; synthetic fixtures do not prove live metadata availability.
+- The ten-detail-request cap resets for each watch on each scan. There is no
+  cursor or location cache across scans, so repeated items can consume the
+  budget and nearby matches farther down can remain unchecked.
 - Polling is interval-based rather than real time.
 - The bot targets one configured Discord development server.
 - Watch threads are visible to members who can access the parent channel.
