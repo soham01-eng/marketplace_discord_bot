@@ -1,0 +1,81 @@
+{
+  "description": "Reduced geographic objects from the supplied anonymous detail-page report. IDs replaced; original coordinates and duplicate/conflicting structure preserved.",
+  "details": [
+    {
+      "listing_id": "101",
+      "objects": [
+        {
+          "id": "101",
+          "location": {
+            "latitude": 42.338562011719,
+            "longitude": -83.051147460938
+          },
+          "item_location": {
+            "latitude": 42.338562011719,
+            "longitude": -83.051147460938
+          }
+        },
+        {
+          "id": "101",
+          "location": {
+            "latitude": 42.338562011719,
+            "longitude": -83.051147460938
+          }
+        }
+      ]
+    },
+    {
+      "listing_id": "102",
+      "objects": [
+        {
+          "id": "102",
+          "location": {
+            "latitude": 42.552795410156,
+            "longitude": -83.029174804688
+          },
+          "item_location": {
+            "latitude": 42.552795410156,
+            "longitude": -83.029174804688
+          }
+        },
+        {
+          "id": "102",
+          "location": {
+            "latitude": 42.552795410156,
+            "longitude": -83.029174804688
+          }
+        }
+      ]
+    },
+    {
+      "listing_id": "103",
+      "objects": [
+        {
+          "id": "103",
+          "location": {
+            "latitude": 42.206726074219,
+            "longitude": -83.204956054688
+          },
+          "item_location": {
+            "latitude": 42.206726074219,
+            "longitude": -83.204956054688
+          }
+        },
+        {
+          "id": "103",
+          "location": {
+            "latitude": 42.206726074219,
+            "longitude": -83.204956054688
+          }
+        },
+        {
+          "id": "103",
+          "location": {
+            "latitude": 42.204702458413,
+            "longitude": -83.205859736808
+          }
+        }
+      ]
+    }
+  ]
+}
